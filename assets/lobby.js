@@ -126,20 +126,42 @@ function renderGuestSettings(){
 
 function showLobby(){
   showScreen('lobbyScreen');
-  $('joinPanel').style.display = MP.isHost ? 'none' : 'block';
-  $('lobbyMain').style.display = MP.isHost ? 'block' : 'none';
+  const server = Net.serverMode;
+  $('joinPanel').style.display = MP.isHost || server ? 'none' : 'block';
+  $('lobbyMain').style.display = MP.isHost || server ? 'block' : 'none';
   $('hostSettings').style.display = MP.isHost ? 'block' : 'none';
   $('guestSettings').style.display = MP.isHost ? 'none' : 'block';
   $('readyBtn').style.display = MP.isHost ? 'none' : 'inline-block';
   $('hostStartBtn').style.display = MP.isHost ? 'inline-block' : 'none';
-  $('lobbyMode').textContent = MP.isHost ? '你是房主 · 生成邀请码发给朋友' : '加入房间';
+  $('inviteSection').style.display = MP.isHost && !server ? 'block' : 'none';
+  $('lobbyMode').textContent = MP.isHost
+    ? (server ? '你是房主 · 玩家可直接加入' : '你是房主 · 生成邀请码发给朋友')
+    : (server ? '已连接服务器 · 等待房主开赛' : '加入房间');
   renderPlayers();
 }
 
 // ============================================================
 //  房主
 // ============================================================
-$('hostBtn').addEventListener('click', ()=>{
+function wsUrl(){
+  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+}
+
+$('hostBtn').addEventListener('click', async ()=>{
+  // 优先: 服务器模式 (node serve.mjs, 免邀请码)
+  if(await Net.serverAvailable()){
+    try{
+      MP.active = true; MP.isHost = true; myName = 'HOST';
+      setupNet();
+      const role = await Net.connectServer(wsUrl(), 'host');
+      MP.myId = role.id;
+      const sel = myCarSel();
+      players = [{ id:MP.myId, name:myName, ...sel, ready:true, slot:HOST_SLOT }];
+      showLobby();
+      return;
+    }catch(e){ console.warn('服务器模式失败, 回退手动 WebRTC', e); }
+  }
+  // 兜底: 纯浏览器手动信令
   if(!Net.supported){ alert('当前浏览器不支持 WebRTC, 请用最新版 Chrome/Edge'); return; }
   MP.active = true; MP.isHost = true; MP.myId = 'host'; myName = 'HOST';
   Net.host();
@@ -229,7 +251,25 @@ $('hostStartBtn').addEventListener('click', ()=>{
 // ============================================================
 //  客人
 // ============================================================
-$('joinBtn').addEventListener('click', ()=>{
+$('joinBtn').addEventListener('click', async ()=>{
+  // 优先: 服务器模式 (免邀请码, 直接进大厅)
+  if(await Net.serverAvailable()){
+    try{
+      MP.active = true; MP.isHost = false;
+      setupNet();
+      const role = await Net.connectServer(wsUrl(), 'guest');
+      MP.myId = role.id;
+      myName = 'PLAYER' + (role.id.replace(/\D/g,'') || '');
+      Net.send({ t:'join', name:myName });
+      showLobby();
+      $('joinPanel').style.display = 'none';
+      $('lobbyMain').style.display = 'block';
+      $('lobbyMode').textContent = '已连接服务器 · 等待房主开赛';
+      renderPlayers();
+      return;
+    }catch(e){ console.warn('服务器模式失败, 回退手动 WebRTC', e); }
+  }
+  // 兜底: 纯浏览器手动信令
   if(!Net.supported){ alert('当前浏览器不支持 WebRTC, 请用最新版 Chrome/Edge'); return; }
   MP.active = true; MP.isHost = false;
   Net.setGuest();

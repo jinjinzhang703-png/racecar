@@ -131,12 +131,70 @@ const Net = (function(){
   }
 
   // ============================================================
+  //  服务器模式 (serve.mjs 内置 WebSocket 中继, 无需复制邀请码)
+  // ============================================================
+  let ws = null;
+  let serverMode = false;
+  const serverGuests = new Set();
+
+  function wsSendJson(obj){
+    if(ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+
+  // 连接服务器并声明角色 ('host'|'guest'), 返回 {id, isHost}
+  function connectServer(url, role){
+    return new Promise((resolve, reject)=>{
+      let settled = false;
+      const fail = e => { if(!settled){ settled = true; reject(e); } };
+      try{ ws = new WebSocket(url); }catch(e){ fail(e); return; }
+      ws.onopen = ()=> ws.send(JSON.stringify({ hello:{ role } }));
+      ws.onerror = ()=> fail(new Error('WebSocket 连接失败'));
+      ws.onclose = ()=>{
+        if(!settled){ fail(new Error('连接已关闭')); return; }
+        if(!isHost) peerHandlers.forEach(fn=>fn('host', 'leave'));
+      };
+      ws.onmessage = ev=>{
+        let m; try{ m = JSON.parse(ev.data); }catch{ return; }
+        if(m.sys === 'role'){
+          serverMode = true;
+          isHost = m.isHost; myId = m.id;
+          if(!settled){ settled = true; resolve(m); }
+          return;
+        }
+        if(m.sys === 'peer'){
+          if(m.ev === 'join') serverGuests.add(m.id); else serverGuests.delete(m.id);
+          peerHandlers.forEach(fn=>fn(m.id, m.ev));
+          return;
+        }
+        if(m.from !== undefined) emitMsg(m.from, JSON.stringify(m.msg));
+      };
+    });
+  }
+
+  // 探测服务器模式是否可用 (http 页面 + WS 可连)
+  function serverAvailable(timeoutMs = 1500){
+    if(!location.protocol.startsWith('http')) return Promise.resolve(false);
+    if(typeof WebSocket === 'undefined') return Promise.resolve(false);
+    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    return new Promise(res=>{
+      let done = false;
+      const finish = ok => { if(!done){ done = true; try{ probe.close(); }catch(e){} res(ok); } };
+      let probe;
+      try{ probe = new WebSocket(url); }catch(e){ res(false); return; }
+      const timer = setTimeout(()=>finish(false), timeoutMs);
+      probe.onopen = ()=>{ clearTimeout(timer); finish(true); };
+      probe.onerror = ()=>{ clearTimeout(timer); finish(false); };
+    });
+  }
+
+  // ============================================================
   //  公共
   // ============================================================
   return {
     get isHost(){ return isHost; },
-    get guestCount(){ return guests.size; },
-    guestIds(){ return [...guests.keys()]; },
+    get serverMode(){ return serverMode; },
+    get guestCount(){ return serverMode ? serverGuests.size : guests.size; },
+    guestIds(){ return serverMode ? [...serverGuests] : [...guests.keys()]; },
     host(){
       isHost = true; myId = 'host';
     },
@@ -145,7 +203,22 @@ const Net = (function(){
     },
     get myId(){ return myId; },
     createInvite, acceptAnswer,
-    join, waitOpen, send, sendTo, broadcast,
+    join, waitOpen,
+    connectServer, serverAvailable,
+    send(obj){
+      if(serverMode){ wsSendJson({ to:'host', msg:obj }); return; }
+      if(dc && dc.readyState==='open') dc.send(JSON.stringify(obj));
+    },
+    sendTo(gid, obj){
+      if(serverMode){ wsSendJson({ to:gid, msg:obj }); return; }
+      const g = guests.get(gid);
+      if(g && g.dc.readyState==='open') g.dc.send(JSON.stringify(obj));
+    },
+    broadcast(obj){
+      if(serverMode){ wsSendJson({ to:'*', msg:obj }); return; }
+      const text = JSON.stringify(obj);
+      guests.forEach(g=>{ if(g.dc.readyState==='open') g.dc.send(text); });
+    },
     onMessage(fn){ msgHandlers.push(fn); },
     onPeer(fn){ peerHandlers.push(fn); },
     supported: typeof RTCPeerConnection !== 'undefined',
