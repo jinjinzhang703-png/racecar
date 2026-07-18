@@ -329,6 +329,50 @@
   }
   .color-swatch:hover{transform:scale(1.15);}
   .color-swatch.selected{border-color:var(--accent);box-shadow:0 0 8px var(--accent);}
+
+  /* ---- 主菜单模式按钮 ---- */
+  .menu-btns{display:flex;flex-direction:column;gap:12px;margin-top:24px;align-items:center;}
+  .menu-btns .btn{margin-top:0;width:280px;}
+  .btn.ghost{background:transparent;border:2px solid var(--accent);color:var(--accent);box-shadow:none;}
+  .btn.ghost:hover{background:rgba(0,229,255,.12);}
+  .btn.small{padding:10px 24px;font-size:13px;}
+
+  /* ---- 选赛道 ---- */
+  .track-cards{display:flex;gap:16px;margin:18px 0 6px;}
+  .track-card{width:230px;padding:16px;border:2px solid var(--rule);border-radius:10px;
+    background:var(--glass);cursor:pointer;text-align:left;transition:all .15s;}
+  .track-card:hover{border-color:var(--accent);}
+  .track-card.selected{border-color:var(--accent);background:rgba(0,229,255,.1);
+    box-shadow:0 0 20px rgba(0,229,255,.15);}
+  .track-card.locked{opacity:.4;cursor:not-allowed;}
+  .track-card .tname{font-size:18px;font-weight:900;color:var(--accent);}
+  .track-card .tsub{font-size:11px;color:var(--ink);margin-top:2px;}
+  .track-card .tdesc{font-size:10px;color:var(--muted);margin-top:6px;letter-spacing:.05em;}
+  .laps-row{display:flex;gap:10px;justify-content:center;margin-top:6px;}
+
+  /* ---- 大厅 ---- */
+  .lobby-cols{display:flex;gap:18px;max-width:920px;width:100%;text-align:left;}
+  .lobby-left{flex:1;min-width:0;}
+  .lobby-right{width:340px;display:flex;flex-direction:column;gap:10px;flex-shrink:0;}
+  .player-row{display:flex;align-items:center;gap:10px;padding:8px 12px;
+    border:1px solid var(--rule);border-radius:8px;background:var(--glass);margin-bottom:6px;}
+  .player-row .pname{flex:1;font-weight:700;font-size:14px;}
+  .player-row .pcar{color:var(--muted);font-size:11px;}
+  .player-row .pready{font-size:10px;font-weight:900;letter-spacing:.1em;color:var(--muted);}
+  .player-row .pready.ready{color:var(--green);}
+  .player-row .phost{font-size:9px;color:var(--soft);border:1px solid var(--soft);
+    border-radius:8px;padding:1px 6px;letter-spacing:.1em;}
+  .code-box{width:100%;height:52px;background:rgba(255,255,255,.05);border:1px solid var(--rule);
+    border-radius:6px;color:var(--ink);font:10px monospace;padding:6px;resize:none;margin-top:4px;}
+  .invite-slot{border:1px solid var(--rule);border-radius:8px;padding:10px;margin-top:8px;}
+  .invite-slot .slot-title{font-size:10px;color:var(--accent);letter-spacing:.15em;margin-bottom:4px;}
+  .lobby-status{font-size:11px;color:var(--accent);margin-top:10px;min-height:14px;}
+  .section-title{font-size:10px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;margin-bottom:6px;}
+  .lobby-btns{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  .name-input{background:rgba(255,255,255,.06);border:1px solid var(--rule);border-radius:6px;
+    color:var(--ink);padding:9px 12px;font-size:13px;font-weight:700;width:200px;
+    font-family:inherit;letter-spacing:.05em;}
+  .name-input:focus{outline:none;border-color:var(--accent);}
 </style>
 </head>
 <body>
@@ -452,7 +496,11 @@
         <button class="diff-btn" data-diff="hard">困难<br><span>AI 极快</span></button>
       </div>
     </div>
-    <button class="btn" id="startBtn">START RACE</button>
+    <div class="menu-btns">
+      <button class="btn" id="startBtn">单人练习</button>
+      <button class="btn ghost" id="hostBtn">创建房间 · 局域网</button>
+      <button class="btn ghost" id="joinBtn">加入房间</button>
+    </div>
     <div class="tips">
       <kbd>W</kbd>/<kbd>↑</kbd> 油门 · <kbd>S</kbd>/<kbd>↓</kbd> 刹车 · <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 转向<br>
       <kbd>Shift</kbd> ERS 超车 · <kbd>E</kbd> DRS(直道) · <kbd>Q</kbd> 进站 · <kbd>C</kbd> 视角 · <kbd>P</kbd> 暂停 · <kbd>R</kbd> 重置<br>
@@ -509,6 +557,106 @@
     </div>
   </div>
 
+  <!-- Track Select (选赛道) -->
+  <div class="screen hidden" id="trackScreen">
+    <div class="garage-title">TRACK SELECT</div>
+    <div class="garage-sub">选择赛道 · 圈数</div>
+    <div class="track-cards" id="trackCards"></div>
+    <div class="difficulty-select" style="margin-top:10px;">
+      <div class="diff-label">比赛圈数</div>
+      <div class="laps-row" id="lapsRow">
+        <button class="diff-btn" data-laps="3">3 圈</button>
+        <button class="diff-btn selected" data-laps="5">5 圈</button>
+        <button class="diff-btn" data-laps="10">10 圈</button>
+      </div>
+    </div>
+    <div class="lobby-btns" style="justify-content:center;">
+      <button class="btn ghost small" id="trackBackBtn">返回</button>
+      <button class="btn small" id="toGarageBtn">进入车库</button>
+    </div>
+  </div>
+
+  <!-- Lobby (联机大厅) -->
+  <div class="screen hidden" id="lobbyScreen">
+    <div class="garage-title">LOBBY</div>
+    <div class="garage-sub" id="lobbyMode">房间大厅</div>
+
+    <!-- 客人: 连接面板 -->
+    <div id="joinPanel" style="display:none;max-width:520px;width:100%;text-align:left;">
+      <div class="section-title">你的名字</div>
+      <input class="name-input" id="guestNameInput" maxlength="12" placeholder="PLAYER">
+      <div class="section-title" style="margin-top:14px;">1 · 粘贴房主的邀请码</div>
+      <textarea class="code-box" id="offerInput" placeholder="粘贴邀请码..."></textarea>
+      <div class="lobby-btns" style="margin-top:8px;">
+        <button class="btn small" id="genAnswerBtn">生成应答码</button>
+        <button class="btn ghost small" id="joinBackBtn">返回</button>
+      </div>
+      <div class="section-title" style="margin-top:14px;">2 · 把应答码发给房主 (微信/QQ 均可)</div>
+      <textarea class="code-box" id="answerOutput" readonly placeholder="应答码将显示在这里"></textarea>
+      <div class="lobby-status" id="joinStatus"></div>
+    </div>
+
+    <!-- 大厅主体 -->
+    <div id="lobbyMain" style="display:none;max-width:920px;width:100%;">
+      <div class="lobby-cols">
+        <div class="lobby-left">
+          <div class="section-title">玩家</div>
+          <div id="lobbyPlayers"></div>
+          <div class="lobby-btns">
+            <button class="btn ghost small" id="lobbyGarageBtn">选择车辆</button>
+            <button class="btn ghost small" id="readyBtn" style="display:none;">READY</button>
+            <button class="btn small" id="hostStartBtn" style="display:none;">START RACE</button>
+            <button class="btn ghost small" id="leaveLobbyBtn">离开</button>
+          </div>
+          <div class="lobby-status" id="lobbyStatus"></div>
+        </div>
+        <div class="lobby-right">
+          <!-- 房主设置 -->
+          <div id="hostSettings" style="display:none;">
+            <div class="config-section">
+              <div class="config-label">赛道</div>
+              <div style="font-size:13px;font-weight:700;color:var(--accent);">MARINA BAY · 滨海湾</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;">更多赛道敬请期待</div>
+            </div>
+            <div class="config-section">
+              <div class="config-label">圈数</div>
+              <div class="diff-options" id="lobbyLapsRow">
+                <button class="diff-btn" data-laps="3">3</button>
+                <button class="diff-btn selected" data-laps="5">5</button>
+                <button class="diff-btn" data-laps="10">10</button>
+              </div>
+            </div>
+            <div class="config-section">
+              <div class="config-label">AI 难度</div>
+              <div class="diff-options" id="lobbyDiffRow">
+                <button class="diff-btn" data-diff="easy">简单</button>
+                <button class="diff-btn selected" data-diff="normal">普通</button>
+                <button class="diff-btn" data-diff="hard">困难</button>
+              </div>
+            </div>
+            <div class="config-section">
+              <label style="font-size:12px;display:flex;gap:8px;align-items:center;cursor:pointer;">
+                <input type="checkbox" id="aiFillChk" checked> AI 补位 (填满12车)
+              </label>
+            </div>
+            <div class="config-section">
+              <div class="config-label">邀请玩家 (逐个生成)</div>
+              <button class="btn ghost small" id="genInviteBtn" style="width:100%;">生成邀请码</button>
+              <div id="inviteSlots"></div>
+            </div>
+          </div>
+          <!-- 客人看到的设置 -->
+          <div id="guestSettings" style="display:none;">
+            <div class="config-section">
+              <div class="config-label">比赛设置 (由房主决定)</div>
+              <div id="guestSettingsView" style="font-size:12px;line-height:1.9;color:var(--ink);">等待同步...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Game over -->
   <div class="screen hidden" id="overScreen">
     <div class="title" style="font-size:38px;color:var(--soft);background:none;-webkit-text-fill-color:var(--soft);">RACE FINISHED</div>
@@ -519,6 +667,7 @@
       <div class="resItem"><div class="rl">TOP SPEED</div><div class="rv" id="topSpeed">0</div></div>
       <div class="resItem"><div class="rl">PITS</div><div class="rv" id="pitCount">0</div></div>
     </div>
+    <div id="mpResults"></div>
     <button class="btn" id="retryBtn">RACE AGAIN</button>
   </div>
 
@@ -538,8 +687,19 @@ window.onerror=function(msg,src,line,col,err){
   document.body.appendChild(d);
 };
 </script>
-<!-- Three.js 全局加载 (CDN) -->
-<script src="https://unpkg.com/three@0.149.0/build/three.js"></script>
+<!-- Three.js 全局加载 (本地优先, CDN 回退) -->
+<script src="assets/vendor/three.min.js"></script>
+<script>
+// 本地副本缺失/损坏时回退 CDN
+if(typeof THREE === 'undefined'){
+  document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"><\/script>');
+}
+</script>
+<script>
+if(typeof THREE === 'undefined'){
+  document.write('<script src="https://unpkg.com/three@0.149.0/build/three.js"><\/script>');
+}
+</script>
 <script>
 // CDN 加载失败时的错误提示
 window.addEventListener('load', function(){
@@ -551,7 +711,15 @@ window.addEventListener('load', function(){
   }
 });
 </script>
+<!-- 赛道数据 (必须在 game.js 之前) -->
+<script src="assets/tracks.js"></script>
+<!-- 2D 刚体碰撞物理 (必须在 game.js 之前) -->
+<script src="assets/physics2d.js"></script>
 <!-- 游戏主逻辑 (普通脚本, 使用全局 THREE) -->
 <script src="assets/game.js"></script>
+<!-- 局域网联机 (WebRTC 手动信令) -->
+<script src="assets/net.js"></script>
+<!-- 主菜单 / 选赛道 / 大厅 -->
+<script src="assets/lobby.js"></script>
 </body>
 </html>

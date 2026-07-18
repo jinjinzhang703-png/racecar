@@ -83,56 +83,19 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 // ============================================================
-//  滨海湾街道赛道 — 逆时针, 19 弯, 城市街道
-//  坐标系: x 横, z 纵(地面), y 上
-//  发车直道(东行) → T1发夹 → 北侧直道 → T9右 →
-//  西侧直道(Raffles) → T12发夹(Fullerton) → 南侧 → 回起点
+//  赛道加载 — 数据定义在 assets/tracks.js (TRACKS)
+//  当前选中赛道由 TRACK.id 决定, 默认第一条可用赛道
 // ============================================================
-const WP = [
-  // Pit straight (eastbound) — 发车直道
-  [-380,340],[-260,342],[-140,340],[-20,342],[80,338],
-  // T1 Sheares — 发夹左
-  [160,326],[210,295],[200,250],[150,245],
-  // T2-T3 — 北上
-  [110,235],[108,150],[115,70],
-  // T4 Republic — 右转
-  [135,30],[190,15],
-  // T5 — 北侧直道
-  [208,-40],[213,-100],
-  // T6 Memorial — 左转
-  [193,-145],[145,-160],
-  // T7-T8 — 减速弯
-  [90,-150],[55,-168],[15,-160],
-  // T9 — 右转南下
-  [-5,-125],[-10,-55],[-12,15],
-  // T10-T11 — 西侧直道(Raffles Blvd)
-  [-20,85],[-28,160],[-35,210],
-  // T12 Anderson — 发夹
-  [-65,235],[-110,238],[-118,205],
-  // T13 Fullerton — 出弯
-  [-98,165],[-82,105],
-  // T14 — 右转
-  [-115,72],[-175,82],
-  // T15 — 西行
-  [-250,88],[-320,94],
-  // T16 — 左转
-  [-355,110],[-368,165],
-  // T17-T19 — 回到起点
-  [-372,240],[-378,300],[-380,340],
-];
-const CORNER_NAMES = {
-  5:'Sheares',8:'T2',9:'T3',11:'Republic',13:'T5',
-  14:'Memorial',16:'T7',17:'T8',18:'T9',
-  20:'Esplanade',23:'Connaught',25:'Anderson',27:'Fullerton',
-  29:'T14',31:'T15',33:'T16',35:'T17',37:'T18',39:'T19'
-};
+const TRACK = TRACKS.find(t=>t.available) || TRACKS[0];
+const WP = TRACK.wp;
+const CORNER_NAMES = TRACK.cornerNames;
 const ROAD_W = 16, HALF_W = ROAD_W/2;
 const WALL_OFFSET = 0.8;  // 围栏距赛道边 (视觉与碰撞统一)
 const WALL_DIST = HALF_W + WALL_OFFSET; // =8.8, 视觉与碰撞共用
 const N_WP = WP.length;
-const S1_END = 14/N_WP, S2_END = 27/N_WP;
-const DRS_ZONES = [ [0, 4/N_WP], [20/N_WP, 22/N_WP], [33/N_WP, 35/N_WP] ];
-const PIT_ZONE = [ [38/N_WP, 1.0], [0.0, 2/N_WP] ];
+const S1_END = TRACK.sectorEnds[0]/N_WP, S2_END = TRACK.sectorEnds[1]/N_WP;
+const DRS_ZONES = TRACK.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
+const PIT_ZONE = TRACK.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
 
 // 构建闭合曲线
 const waypoints = WP.map(p=>new THREE.Vector3(p[0],0,p[1]));
@@ -1312,7 +1275,7 @@ function buildF1Car(color, team, isPlayer){
   return g;
 }
 
-const TOTAL_LAPS = 5;
+let totalLaps = 5; // 可由 startRace(config.laps) 修改
 
 // ============================================================
 //  维修站 (Pit Building) — 维修通道南侧 (必须在 TEAMS 之后)
@@ -1603,67 +1566,9 @@ const _tmp=new THREE.Vector3();
 // nearestSample / nearestSegment 已在城市建筑段之前定义
 
 // ============================================================
-//  底层物理引擎 (刚体动力学 + 冲量碰撞 + 摩擦力)
-//  RigidBody2D: 2D平面上的简化刚体, 模拟F1赛车的横向/纵向/偏航动力学
+//  底层物理引擎: 已迁移至 assets/physics2d.js (Physics2D)
+//  2D 刚体冲量求解 (含偏航力矩), 参数参考真实 F1 赛车数据
 // ============================================================
-const RigidBody = {
-  // 冲量碰撞响应: 基于法线/切线分解的物理模型
-  // 参数: body, normal, tangent, penetration, impactSpeed, lateralSign(车辆在墙的哪一侧, 来自 seg.lateral 的符号)
-  resolveWallCollision(body, normal, tangent, penetration, impactSpeed, lateralSign){
-    const vn = body.velocity.dot(normal); // 法线速度分量
-    const vt = body.velocity.dot(tangent); // 切线速度分量
-
-    // 1. 位置修正: 推出穿透
-    //    方向由 lateralSign 决定 (车辆在法线哪一侧), 而非速度方向 (vn)
-    //    这样二次验证循环中 velocity 已反弹时也能正确推回
-    const correction = penetration + 0.03;
-    const sign = lateralSign || (Math.sign(vn) || 1);
-    body.pos.addScaledVector(normal, -sign * correction);
-
-    // 2. 法线冲量: 恢复系数 e (F1赛车擦墙: 极低弹性, 高动能吸收)
-    const restitution = impactSpeed > 50 ? 0.08 : impactSpeed > 25 ? 0.03 : 0.0;
-    const newVn = -vn * restitution;
-
-    // 3. 切线摩擦: 库仑摩擦模型
-    const mu = 0.15;
-    const maxFriction = Math.abs(newVn) * mu + Math.abs(vt) * 0.08;
-    let newVt = vt;
-    if(Math.abs(vt) > 0.1){
-      const frictionImpulse = Math.min(Math.abs(vt) * 0.12, maxFriction);
-      newVt = vt - Math.sign(vt) * frictionImpulse;
-    }
-
-    // 4. 合成新速度
-    body.velocity.set(
-      normal.x * newVn + tangent.x * newVt, 0,
-      normal.z * newVn + tangent.z * newVt
-    );
-
-    // 5. 偏航力矩: 撞击角点偏离质心时产生旋转
-    const localImpactX = (collisionPoint_local || {x:0}).x;
-    const yawTorque = localImpactX * vn * 0.003;
-    body.angularVel = (body.angularVel || 0) + yawTorque;
-    // 角速度阻尼: 每次碰撞后衰减, 防止无界累积
-    body.angularVel *= 0.6;
-
-    // 6. 速度衰减: 撞击动能损失 (非弹性碰撞)
-    const energyLoss = impactSpeed > 50 ? 0.60 : impactSpeed > 25 ? 0.40 : 0.20;
-    const finalSpeed = body.velocity.length() * (1 - energyLoss * 0.5);
-    if(finalSpeed > 0.001){
-      body.velocity.normalize().multiplyScalar(finalSpeed);
-    }
-    body.speed = finalSpeed * Math.sign(body.speed || 1);
-
-    // 7. 最低滑行速度
-    if(Math.abs(body.speed) < 2 && impactSpeed > 5){
-      body.speed = 2 * Math.sign(body.speed || 1);
-    }
-
-    return { newVn, newVt, finalSpeed };
-  }
-};
-
-let collisionPoint_local = null; // 碰撞点局部坐标 (供物理引擎使用)
 
 // ============================================================
 //  围栏硬碰撞 (边界框 + 冲量物理引擎 + 子步防穿模)
@@ -1711,22 +1616,18 @@ function barrierCollision(c){
 
   // === 边界框碰撞: 检查全部角点 + 中心 ===
   let maxOvershoot = 0;
-  let pushSeg = seg;
   let pushSign = 0;
   let pushNormal = null;
-  let pushTangent = null;
   let collisionPoint = null;
-  let collisionLocalX = 0;
 
   // 中心点检查
   if(seg.absLat > WALL_DIST){
     const overshoot = seg.absLat - WALL_DIST;
     if(overshoot > maxOvershoot){
       maxOvershoot = overshoot;
-      pushSeg = seg; pushSign = Math.sign(seg.lateral);
-      pushNormal = seg.normal; pushTangent = seg.tangent;
+      pushSign = Math.sign(seg.lateral);
+      pushNormal = seg.normal;
       collisionPoint = c.pos.clone();
-      collisionLocalX = 0;
     }
   }
 
@@ -1738,84 +1639,77 @@ function barrierCollision(c){
       const overshoot = cornerSeg.absLat - WALL_DIST;
       if(overshoot > maxOvershoot){
         maxOvershoot = overshoot;
-        pushSeg = cornerSeg; pushSign = Math.sign(cornerSeg.lateral);
-        pushNormal = cornerSeg.normal; pushTangent = cornerSeg.tangent;
+        pushSign = Math.sign(cornerSeg.lateral);
+        pushNormal = cornerSeg.normal;
         collisionPoint = corner.clone(); collisionPoint.y = 0.3;
-        collisionLocalX = corner._localX || 0;
       }
     }
   }
 
   if(maxOvershoot > 0){
     hit = true;
-    let impactSpeed = Math.abs(c.speed);
-    collisionPoint_local = { x: collisionLocalX };
+    // 墙法线: 指向赛道内侧 (即把车推回赛道的方向)
+    const nx = -pushSign * pushNormal.x, nz = -pushSign * pushNormal.z;
 
-    // === 物理引擎: 冲量碰撞响应 (传入 lateralSign 确保位置修正方向正确) ===
-    RigidBody.resolveWallCollision(
-      c, pushNormal, pushTangent, maxOvershoot, impactSpeed, pushSign
-    );
+    // === 物理引擎: 单点接触冲量 (Physics2D, 含偏航力矩) ===
+    const res = Physics2D.wallResolve(c, collisionPoint.x, collisionPoint.z, nx, nz, maxOvershoot);
 
-    // 二次验证: 确保推回后无穿透 (每次重新计算 impactSpeed, 防止陈旧)
-    let prevOV = maxOvershoot;
+    // 二次验证: 残留穿透直接位置推出 (速度已由冲量求解)
     for(let iter=0; iter<3; iter++){
-      let reOV=0, reN=null, reT=null, reS=0, reLX=0;
+      let reOV=0, reN=null, reS=0;
       const reCorners = getCarCorners(c);
       for(const corner of reCorners){
         const cs = nearestSegment(corner);
         if(cs.absLat > WALL_DIST){
           const ov = cs.absLat - WALL_DIST;
-          if(ov > reOV){ reOV=ov; reN=cs.normal; reT=cs.tangent; reS=Math.sign(cs.lateral); reLX=corner._localX||0; }
+          if(ov > reOV){ reOV=ov; reN=cs.normal; reS=Math.sign(cs.lateral); }
         }
       }
       const csC = nearestSegment(c.pos);
       if(csC.absLat > WALL_DIST){
         const ov = csC.absLat - WALL_DIST;
-        if(ov > reOV){ reOV=ov; reN=csC.normal; reT=csC.tangent; reS=Math.sign(csC.lateral); reLX=0; }
+        if(ov > reOV){ reOV=ov; reN=csC.normal; reS=Math.sign(csC.lateral); }
       }
       if(reOV <= 0) break;
-      // 无进展保护: 如果穿透没有减少, 停止迭代避免恶化
-      if(reOV >= prevOV && iter > 0) break;
-      prevOV = reOV;
-      collisionPoint_local = { x: reLX };
-      const reImpactSpeed = Math.abs(c.speed);
-      RigidBody.resolveWallCollision(c, reN, reT, reOV, reImpactSpeed, reS);
+      c.pos.addScaledVector(reN, -reS * (reOV * 0.5 + 0.02));
     }
 
-    // 朝向修正: 向墙面切线方向渐进靠拢
-    seg = nearestSegment(c.pos);
-    const wallHeading = Math.atan2(seg.tangent.x, seg.tangent.z);
-    let headingDiff = wallHeading - c.heading;
-    headingDiff = Math.atan2(Math.sin(headingDiff), Math.cos(headingDiff));
-    const headingCorrection = Math.min(0.6, impactSpeed / 80);
-    c.heading += headingDiff * headingCorrection;
+    // 撞击烈度: 法向接近速度 (真实物理量, 沿墙刮擦不再误判为重撞)
+    const impact = res ? Math.abs(res.vn) : 0;
 
-    // collisionLock: 仅高速重撞启用
-    if(impactSpeed > 30){
-      c.collisionLock = 0.06;
+    // speed 同步: 速度在车头方向的投影 (带符号, 允许横滑)
+    {
+      const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+      c.speed = c.velocity.x*fx + c.velocity.z*fz;
+    }
+
+    // collisionLock: 法向重撞时让反弹速度真正积分
+    if(impact > 12){
+      c.collisionLock = 0.06 + Math.min(0.08, impact * 0.0012);
       c.collisionVel.copy(c.velocity);
       c.collisionSpin = c.angularVel || 0;
-      c.speed = c.velocity.length() * Math.sign(c.speed || 1); // 同步 speed, 防止退出后跳变
     } else {
       c.collisionLock = 0;
     }
 
-    // 特效
+    // 特效 (按法向撞击速度分级)
     const sparkPos = collisionPoint || c.pos;
-    if(impactSpeed > 30 && c.crashTimer <= 0){
+    if(impact > 22 && c.crashTimer <= 0){
       c.crashTimer = 0.3;
-      c.crashAngle = (Math.random()>0.5?1:-1)*(0.2+Math.random()*0.2);
-      if(c.isPlayer){ flashMsg('CRASH!','碰撞 · '+(impactSpeed*3.6|0)+'km/h'); camShake=Math.min(1.0, impactSpeed/45); playCrashSound(1.0); }
-      else if(impactSpeed>40) playCrashSound(0.5);
-      spawnSparks(sparkPos, Math.min(15, Math.floor(impactSpeed/3)));
-    } else if(impactSpeed > 15 && c.crashTimer <= 0){
-      if(c.isPlayer){ camShake=Math.max(camShake, impactSpeed/70); flashMsg('TOUCH','擦碰'); playCrashSound(0.3); }
+      // 翻滚方向跟随求解出的偏航方向
+      c.crashAngle = (Math.sign(c.angularVel)||(Math.random()>0.5?1:-1))*(0.2+Math.random()*0.2);
+      if(c.isPlayer){ flashMsg('CRASH!','碰撞 · '+(impact*3.6|0)+'km/h'); camShake=Math.min(1.0, impact/40); playCrashSound(1.0); }
+      else if(impact>35) playCrashSound(0.5);
+      spawnSparks(sparkPos, Math.min(15, Math.floor(impact/2)));
+    } else if(impact > 9 && c.crashTimer <= 0){
+      if(c.isPlayer){ camShake=Math.max(camShake, impact/60); flashMsg('TOUCH','擦碰'); playCrashSound(0.3); }
       spawnSparks(sparkPos, 5);
-    } else if(impactSpeed > 5 && c.crashTimer <= 0){
+    } else if(impact > 2.5){
       spawnSparks(sparkPos, 2);
     }
-    if(c.isPlayer) c.tire = Math.max(0, c.tire - 4);
-    else c.tire = Math.max(0, c.tire - 3); // AI 撞墙也扣轮胎 (略少)
+    // 刮擦/撞击消耗轮胎: 烈度越大损耗越多
+    const tireHit = impact > 20 ? 6 : impact > 8 ? 3 : impact > 2.5 ? 1 : 0;
+    c.tire = Math.max(0, c.tire - tireHit);
   }
 
   c._lastHit = hit;
@@ -2207,7 +2101,7 @@ function updateAI(c, dt){
     c.tire = Math.max(0, c.tire - wear * dt);
     c.fuel = Math.max(0, c.fuel - 0.007 * dt);
     const inPitZone = (c.progress > 0.92 || c.progress < 0.08);
-    const lapsLeft = TOTAL_LAPS - c.lap;
+    const lapsLeft = totalLaps - c.lap;
     const strat = c.pitStrategy || 'balanced';
     let shouldPit = false;
     if(strat === 'aggressive'){
@@ -2544,11 +2438,11 @@ function completeLap(c){
   }
   if(c.isPlayer){
     renderSectorUI();
-    if(c.lap===TOTAL_LAPS-1) flashMsg('FINAL LAP','最后一圈');
+    if(c.lap===totalLaps-1) flashMsg('FINAL LAP','最后一圈');
     if(c.lastLapTime!=null) flashMsg('LAP '+c.lap, fmt(c.lastLapTime));
     if(c.tireDegraded) flashMsg('TIRE WARN','轮胎衰减! 需进站换胎');
   }
-  if(c.lap>=TOTAL_LAPS){
+  if(c.lap>=totalLaps){
     c.finished=true; c.finishTime=raceClock;
     if(c.isPlayer) endRace();
   }
@@ -2707,6 +2601,9 @@ function getSelectedPlayerConfig(){
   };
 }
 
+// 默认比赛配置 (lobby.js 设置, 车库确认后直接开赛时使用)
+let defaultRaceConfig = {};
+function setDefaultRaceConfig(cfg){ defaultRaceConfig = cfg || {}; }
 function openGarage(){
   buildGarageUI();
   $('startScreen').classList.add('hidden');
@@ -2714,26 +2611,87 @@ function openGarage(){
 }
 function closeGarage(){
   $('garageScreen').classList.add('hidden');
-  startRace();
+  // 联机大厅里打开车库时, 确认后返回大厅而非直接开赛 (由 lobby.js 设置)
+  if(window.onGarageConfirm){ const h=window.onGarageConfirm; window.onGarageConfirm=null; h(); return; }
+  startRace(defaultRaceConfig);
 }
 
-// 难度选择器
-document.querySelectorAll('.diff-btn').forEach(btn=>{
+// 难度选择器 (仅主菜单, 大厅内有独立的难度控件)
+document.querySelectorAll('#startScreen .diff-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.diff-btn').forEach(b=>b.classList.remove('selected'));
+    document.querySelectorAll('#startScreen .diff-btn').forEach(b=>b.classList.remove('selected'));
     btn.classList.add('selected');
     difficulty=btn.dataset.diff;
   });
 });
 
-// 难度选择确认 → 打开车库
-$('startBtn').addEventListener('click', openGarage);
-// 车库确认 → 开始比赛
+// startBtn (单人练习) 由 lobby.js 绑定 → 选赛道
+// 车库确认 → 开始比赛 / 返回大厅
 $('confirmCarBtn').addEventListener('click', closeGarage);
 
-function startRace(){
+// 应用车辆涂装/性能配置到车对象 (本地玩家与远程玩家共用)
+// cfg: { teamName, short, driver, color, num, maxSpeed, tireType, tireMaxLaps }
+function applyCarLivery(c, cfg){
+  c.maxSpeed = cfg.maxSpeed;
+  c.teamName = cfg.teamName;
+  c.name = cfg.driver;
+  c.num = cfg.num;
+  c.tireType = cfg.tireType || 'soft';
+  c.tireMaxLaps = cfg.tireMaxLaps || (c.tireType === 'soft' ? 3 : 4);
+  c.tireCompound = c.tireType === 'soft' ? 'S' : 'H';
+  // 应用自定义颜色
+  const bodyMat = c.mesh.userData.bodyMat;
+  if(bodyMat){
+    bodyMat.color.setHex(cfg.color);
+    bodyMat.emissive.setHex(cfg.color); // 同步 emissive, 夜赛辉光一致
+  }
+  if(c.mesh.userData.helmetMat) c.mesh.userData.helmetMat.color.setHex(cfg.color);
+  // 重建侧箱纹理 (车队名+车号) 以匹配选择的车队
+  if(c.mesh.userData.sidepodMat){
+    const garageTeam = {
+      name: cfg.teamName,
+      short: cfg.short || cfg.teamName.substring(0,3).toUpperCase(),
+      driver: cfg.driver,
+      num: cfg.num,
+      color: cfg.color,
+      accent: cfg.color
+    };
+    const newTex = new THREE.CanvasTexture(makeCarTexture(garageTeam, true));
+    c.mesh.userData.sidepodMat.map = newTex;
+    c.mesh.userData.sidepodMat.color.setHex(0xffffff);
+    c.mesh.userData.sidepodMat.emissive.setHex(cfg.color);
+    c.mesh.userData.sidepodMat.needsUpdate = true;
+  }
+  // 拷贝而非改写共享 TEAMS 元素 (修复跨比赛/联机串色)
+  c.team = Object.assign({}, c.team, { color:cfg.color, name:cfg.teamName, driver:cfg.driver, num:cfg.num });
+  // 轮胎视觉标记 (软胎=红色, 硬胎=白色)
+  if(c.mesh.userData.wheelRings){
+    const tireColor = c.tireType === 'soft' ? 0xff3333 : 0xffffff;
+    c.mesh.userData.wheelRings.forEach(r => r.material.color.setHex(tireColor));
+  }
+  // 对手头顶标记同步为车色 (远程玩家用)
+  if(c.marker){
+    c.marker.material.color.setHex(cfg.color);
+    const ud = c.marker.userData;
+    if(ud.glow) ud.glow.material.color.setHex(cfg.color);
+    if(ud.beam) ud.beam.material.color.setHex(cfg.color);
+    if(ud.arrow) ud.arrow.material.color.setHex(cfg.color);
+  }
+}
+
+// config: { laps, difficulty, playerSlot, playerConfig,
+//           remotePlayers:[{ id, slot, teamName, short, driver, color, num, maxSpeed, tireType, tireMaxLaps }] }
+function startRace(config){
+  config = config || defaultRaceConfig;
+  if(config.laps) totalLaps = config.laps;
+  if(config.difficulty) difficulty = config.difficulty;
   cars=[]; scene.children.filter(o=>o.userData&&o.userData.isCar).forEach(o=>scene.remove(o));
-  const playerCfg = getSelectedPlayerConfig();
+  const playerCfg = config.playerConfig || getSelectedPlayerConfig();
+  const playerSlot = (config.playerSlot != null) ? config.playerSlot : Math.floor(NCARS/2);
+  const remoteBySlot = {};
+  for(const rp of (config.remotePlayers || [])) remoteBySlot[rp.slot] = rp;
+  const aiFill = config.aiFill !== false;   // 联机可关闭 AI 补位
+  const guestMode = !!config.guestMode;     // 客人端: 非本机车辆全部由房主广播驱动
   // 为 NPC 去重分配 pitBoxIdx (0~NCARS-1 打乱)
   const pitBoxOrder = Array.from({length: NCARS}, (_, i) => i);
   for(let i = pitBoxOrder.length - 1; i > 0; i--){
@@ -2744,58 +2702,35 @@ function startRace(){
   const slots=[];
   for(let i=0;i<NCARS;i++) slots.push(i);
   for(const s of slots){
-    const isP=(s===Math.floor(NCARS/2));
+    const isP=(s===playerSlot);
+    const rp=remoteBySlot[s]||null;
+    if(!isP && !rp && !aiFill) continue; // 无 AI 补位: 只创建真人车辆
     const c=makeCar(isP,s);
+    c.gridSlot=s;
     c.mesh.userData.isCar=true;
+    if(guestMode && !isP) c.isRemote=true; // 客人端: AI 与远程真人一样由网络驱动
     // NPC 分配不重复的 pitBoxIdx
     if(!isP){
       c.pitBoxIdx = pitBoxOrder[pitBoxAssignIdx % pitBoxOrder.length];
       pitBoxAssignIdx++;
     }
     if(isP){
-      // 应用车库配置到玩家车辆
       player=c;
-      c.maxSpeed = playerCfg.maxSpeed;
-      c.teamName = playerCfg.teamName;
-      c.name = playerCfg.driver;
-      c.num = playerCfg.num;
-      c.tireType = playerCfg.tireType;
-      c.tireMaxLaps = playerCfg.tireMaxLaps;
-      c.tireCompound = playerCfg.tireType === 'soft' ? 'S' : 'H';
-      // 应用自定义颜色
-      const bodyMat = c.mesh.userData.bodyMat;
-      if(bodyMat){
-        bodyMat.color.setHex(playerCfg.color);
-        bodyMat.emissive.setHex(playerCfg.color); // 同步 emissive, 夜赛辉光一致
-      }
-      if(c.mesh.userData.helmetMat) c.mesh.userData.helmetMat.color.setHex(playerCfg.color);
-      // 重建侧箱纹理 (车队名+车号) 以匹配选择的车队
-      if(c.mesh.userData.sidepodMat){
-        const garageTeam = {
-          name: playerCfg.teamName,
-          short: playerCfg.short,
-          driver: playerCfg.driver,
-          num: playerCfg.num,
-          color: playerCfg.color,
-          accent: playerCfg.color
-        };
-        const newTex = new THREE.CanvasTexture(makeCarTexture(garageTeam, true));
-        c.mesh.userData.sidepodMat.map = newTex;
-        c.mesh.userData.sidepodMat.color.setHex(0xffffff);
-        c.mesh.userData.sidepodMat.emissive.setHex(playerCfg.color);
-        c.mesh.userData.sidepodMat.needsUpdate = true;
-      }
-      // 更新 c.team 以保持小地图等使用正确颜色
-      if(c.team){ c.team.color = playerCfg.color; c.team.name = playerCfg.teamName; c.team.driver = playerCfg.driver; c.team.num = playerCfg.num; }
-      // 轮胎视觉标记 (软胎=红色, 硬胎=白色)
-      if(c.mesh.userData.wheelRings){
-        const tireColor = playerCfg.tireType === 'soft' ? 0xff3333 : 0xffffff;
-        c.mesh.userData.wheelRings.forEach(r => r.material.color.setHex(tireColor));
-      }
+      applyCarLivery(c, playerCfg);
+    } else if(rp){
+      // 远程真人玩家: 应用其车库配置, 不跑AI, 由网络状态驱动
+      c.isRemote = true;
+      c.remoteId = rp.id;
+      applyCarLivery(c, rp);
     }
+    // 刚体参数 (Physics2D): 远程车为运动学刚体(invMass=0), 不被碰撞推离网络插值
+    c._invMass = c.isRemote ? 0 : Physics2D.CAR.INV_MASS;
+    c._invInertia = c.isRemote ? 0 : Physics2D.CAR.INV_INERTIA;
     cars.push(c);
   }
   raceClock=0; race.phase='grid'; race.lights=0; race.lightTimer=0;
+  // 联机: 房主指定的灭灯延迟, 各端一致才能同步起跑; 单机为 null (随机)
+  race.lightsOutDelay = (config.lightsOutDelay != null) ? config.lightsOutDelay : null;
   // 重置全局状态 (防止跨比赛残留)
   maxKph=0;
   if(typeof pitGame !== 'undefined'){
@@ -2807,14 +2742,18 @@ function startRace(){
   ui.garageScreen.classList.add('hidden');
   ui.overScreen.classList.add('hidden');
   ui.pauseScreen.classList.add('hidden');
+  const mpRes = $('mpResults'); if(mpRes) mpRes.innerHTML='';
+  const trackScr = $('trackScreen'); if(trackScr) trackScr.classList.add('hidden');
+  const lobbyScr = $('lobbyScreen'); if(lobbyScr) lobbyScr.classList.add('hidden');
   buildLights();
   ui.lights.style.display='flex';
-  ui.lapTotal.textContent=TOTAL_LAPS;
+  ui.lapTotal.textContent=totalLaps;
   ui.posTotal.textContent='/'+cars.length;
+  ui.raceInfo.textContent=TRACK.name+' · '+TRACK.sub+' · '+totalLaps+' LAPS';
   camPos.copy(player.pos).add(new THREE.Vector3(-11,5.5,0));
   camera.position.copy(camPos);
   for(const c of cars){ c.lapStartTime=0; }
-  flashMsg('FORMATION', playerCfg.teamName + ' · ' + playerCfg.driver + ' · 新加坡夜赛');
+  flashMsg('FORMATION', playerCfg.teamName + ' · ' + playerCfg.driver + ' · ' + TRACK.sub);
 }
 
 function buildLights(){
@@ -2838,7 +2777,7 @@ function updateRace(dt){
       player.jumpStart=true;
       flashMsg('JUMP START','起步后将罚停 2.5s');
     }
-    if(race.lights>=5 && race.lightTimer>rand(0.7,2.6)){
+    if(race.lights>=5 && race.lightTimer>(race.lightsOutDelay!=null ? race.lightsOutDelay : rand(0.7,2.6))){
       lightsOut();
       race.phase='racing';
       raceClock=0;
@@ -2991,7 +2930,7 @@ function updateSpeedBlur(){
 function updateHUD(dt){
   if(!player) return;
   const c=player;
-  ui.lapBig.textContent=Math.min(c.lap+1,TOTAL_LAPS);
+  ui.lapBig.textContent=Math.min(c.lap+1,totalLaps);
   const ranked=[...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
   const pos=ranked.indexOf(c)+1;
   ui.posBig.textContent='P'+pos;
@@ -3362,6 +3301,10 @@ function endRace(){
   ui.overSub.textContent = pos===1?`${player.name} · ${player.teamName} · 夜赛冠军！`:`${player.name} · ${player.teamName} · 最终成绩`;
   ui.overScreen.classList.remove('hidden');
   race.phase='over';
+  // 联机: 上报完赛, 由房主汇总最终名次表 (lobby.js)
+  if(typeof window.onLocalFinish==='function'){
+    window.onLocalFinish({ time: player.finishTime || raceClock });
+  }
 }
 let maxKph=0;
 
@@ -3646,6 +3589,29 @@ document.addEventListener('visibilitychange',()=>{
   }
 });
 
+// ---------- 联机: 远程车辆插值 ----------
+// 网络状态由 lobby.js 写入 c._netPrev/_netNext, 这里做 120ms 延迟插值
+function updateRemoteCar(c){
+  const a=c._netPrev, b=c._netNext;
+  if(!b) return;
+  if(!a || b.t<=a.t){
+    c.pos.set(b.p[0],b.p[1],b.p[2]);
+    c.heading=b.h; c.speed=b.v;
+  } else {
+    const rt=performance.now()-120;
+    const span=Math.max(1, b.t-a.t);
+    const k=THREE.MathUtils.clamp((rt-a.t)/span, 0, 1.2);
+    c.pos.set(a.p[0]+(b.p[0]-a.p[0])*k, a.p[1]+(b.p[1]-a.p[1])*k, a.p[2]+(b.p[2]-a.p[2])*k);
+    let dh=b.h-a.h;
+    while(dh>Math.PI)dh-=2*Math.PI;
+    while(dh<-Math.PI)dh+=2*Math.PI;
+    c.heading=a.h+dh*k;
+    c.speed=a.v+(b.v-a.v)*k;
+  }
+  c.velocity.set(Math.sin(c.heading)*c.speed, 0, Math.cos(c.heading)*c.speed);
+  applyMesh(c);
+}
+
 function loop(){
   requestAnimationFrame(loop);
   let dt=Math.min(clock.getDelta(),0.05);
@@ -3660,11 +3626,13 @@ function loop(){
     updateRace(dt);
     updatePlayer(dt);
     for(const c of cars){
+      if(c.isRemote){ updateRemoteCar(c); continue; } // 联机: 网络驱动的车不跑AI
       if(!c.isPlayer){
         try{ updateAI(c,dt); }
         catch(e){ console.warn('AI error:', e); }
       }
     }
+    if(typeof window.MPraceTick==='function') window.MPraceTick(dt); // 联机状态广播 (20Hz)
     try{ carCollisions(); } catch(e){}
     updateDRS();
     maxKph=Math.max(maxKph, player.speed*3.2);
@@ -3751,79 +3719,66 @@ function loop(){
 function carCollisions(){
   for(let i=0;i<cars.length;i++)for(let j=i+1;j<cars.length;j++){
     const a=cars[i],b=cars[j];
-    // 碰撞冷却期: 防止反复碰撞 (0.5秒内不再触发)
-    if(a.collisionCooldown > 0 || b.collisionCooldown > 0) continue;
+    // 宽相剔除: 车体对角线 ~2.05m, 两车最远距离 4.2m
     const dx=b.pos.x-a.pos.x, dz=b.pos.z-a.pos.z;
-    const d=Math.hypot(dx,dz);
-    const min=3.0; // F1车约5m×2m, 碰撞半径约3m (原4.2太大, 导致隔空碰撞)
-    if(d<min && d>0.01){
-      const ov=(min-d)/2;
-      const nx=dx/d, nz=dz/d;
-      // 位置分离 (限制分离距离, 防止弹飞)
-      const sep = Math.min(ov, 1.0); // 降低分离距离
-      a.pos.x-=nx*sep; a.pos.z-=nz*sep;
-      b.pos.x+=nx*sep; b.pos.z+=nz*sep;
+    if(dx*dx+dz*dz > 4.2*4.2) continue;
+    // 进站车辆不参与碰撞
+    if(a.pitting || b.pitting) continue;
+    // 窄相: OBB vs OBB (SAT)
+    const contact = Physics2D.obbContact(a, b);
+    if(!contact) continue;
+    // 双刚体冲量求解 (远程车为运动学刚体: 不被推离网络插值)
+    const res = Physics2D.carCarResolve(a, b, contact);
+    // speed 同步: 前向投影 (远程车速度由网络决定, 不覆盖)
+    for(const c of [a,b]){
+      if(c.isRemote) continue;
+      const fx=Math.sin(c.heading), fz=Math.cos(c.heading);
+      c.speed = c.velocity.x*fx + c.velocity.z*fz;
+    }
+    if(!res) continue; // 已在分离, 仅位置修正
+    const sev = Math.abs(res.vn); // 法向接近速度 (真实物理量)
+    if(sev < 1.5) continue;
 
-      // ===== 法向相对速度 (替代纵向 |va-vb|) =====
-      const relVel=new THREE.Vector3().subVectors(a.velocity, b.velocity);
-      const relSpeedN=Math.abs(relVel.x*nx + relVel.z*nz);
-      // 限制冲量, 防止过大
-      const impulse=Math.min(relSpeedN*0.4, 15); // 降低冲量系数
+    // 碰撞锁定: 让冲量结果积分 (本地车)
+    const lockT = 0.05 + Math.min(0.07, sev*0.0012);
+    for(const c of [a,b]){
+      if(c.isRemote) continue;
+      c.collisionLock = Math.max(c.collisionLock, lockT);
+      c.collisionVel.copy(c.velocity);
+      c.collisionSpin = c.angularVel;
+    }
+    // AI 行为兼容: 显著撞击后短暂进入保守速度 (updateAI 读取)
+    if(sev>6){ a.collisionCooldown=0.5; b.collisionCooldown=0.5; }
 
-      // 沿法线传递动量
-      a.velocity.addScaledVector(new THREE.Vector3(nx,0,nz), -impulse*0.5);
-      b.velocity.addScaledVector(new THREE.Vector3(nx,0,nz),  impulse*0.5);
+    // 效果节流: 每对车 0.25s 只触发一次
+    a._pairFx = a._pairFx || {};
+    if(a._pairFx[j] != null && raceClock - a._pairFx[j] < 0.25) continue;
+    a._pairFx[j] = raceClock;
 
-      // ===== 旋转冲量 (打转/横甩) =====
-      const tx=-nz, tz=nx;
-      const relT=relVel.x*tx + relVel.z*tz;
-      const spin=THREE.MathUtils.clamp(relT*0.03, -1.5, 1.5); // 降低旋转强度
-      a.collisionSpin=spin;  b.collisionSpin=-spin;
-      a.heading += spin*0.015; b.heading -= spin*0.015;
+    // 轮胎损耗 (烈度相关)
+    const tireHit = sev > 20 ? 5 : sev > 8 ? 3 : 1;
+    a.tire = Math.max(0, a.tire - tireHit);
+    b.tire = Math.max(0, b.tire - tireHit);
 
-      // ===== 速度衰减 + 持久化 + collisionLock =====
-      const damp=0.90+Math.min(0.06, relSpeedN*0.004); // 降低衰减
-      a.speed*=damp; b.speed*=damp;
-      // 限制速度幅值
-      const aSpeed = Math.abs(a.speed);
-      if(aSpeed > 45) a.speed = 45 * Math.sign(a.speed);
-      const bSpeed = Math.abs(b.speed);
-      if(bSpeed > 45) b.speed = 45 * Math.sign(bSpeed);
-      a.collisionLock=Math.max(a.collisionLock, 0.08); // 缩短锁定时间
-      b.collisionLock=Math.max(b.collisionLock, 0.08);
-      a.collisionVel.copy(a.velocity);
-      b.collisionVel.copy(b.velocity);
-      // 设置碰撞冷却期
-      a.collisionCooldown=0.5;
-      b.collisionCooldown=0.5;
-      // 碰撞消耗轮胎 (所有车辆统一: 每次碰撞 -4%)
-      a.tire = Math.max(0, a.tire - 4);
-      b.tire = Math.max(0, b.tire - 4);
+    // 高速重撞: 翻滚动画, 方向跟随偏航
+    if(sev>22){
+      if(a.crashTimer<=0){ a.crashTimer=0.3; a.crashAngle=(Math.sign(a.angularVel)||1)*(0.3+Math.random()*0.2); }
+      if(b.crashTimer<=0){ b.crashTimer=0.3; b.crashAngle=(Math.sign(b.angularVel)||-1)*(0.3+Math.random()*0.2); }
+    }
 
-      // ===== crashTimer 翻滚 (高速) =====
-      if(relSpeedN>25 && a.crashTimer<=0){
-        a.crashTimer=0.3;
-        a.crashAngle=(spin>0?1:-1)*(0.3+Math.random()*0.2); // 降低翻滚角度
-      }
-      if(relSpeedN>25 && b.crashTimer<=0){
-        b.crashTimer=0.3;
-        b.crashAngle=(-spin>0?1:-1)*(0.3+Math.random()*0.2);
-      }
+    // 火花/烟雾
+    const mid=new THREE.Vector3((a.pos.x+b.pos.x)/2, 0.4, (a.pos.z+b.pos.z)/2);
+    const sevK=THREE.MathUtils.clamp(sev/25, 0, 1);
+    spawnSparks(mid, Math.floor(3+sevK*12));
+    if(sevK>0.35) spawnSmoke(mid, Math.floor(3+sevK*8));
 
-      // ===== 火花/烟雾特效 =====
-      const mid=new THREE.Vector3().addVectors(a.pos,b.pos).multiplyScalar(0.5);
-      mid.y=0.4;
-      const sev=THREE.MathUtils.clamp(relSpeedN/30, 0, 1);
-      spawnSparks(mid, Math.floor(4+sev*14));
-      if(sev>0.3) spawnSmoke(mid, Math.floor(3+sev*8));
-
-      // ===== 低速音效 + 震动 =====
-      if(relSpeedN>5){
-        const vol=THREE.MathUtils.clamp(relSpeedN/40, 0.08, 1);
-        if(a.isPlayer||b.isPlayer){
-          camShake=Math.max(camShake, relSpeedN/80); // 降低 shake 强度
-          playCrashSound(vol);
-        }
+    // 音效 + 震动
+    if(sev>4){
+      const vol=THREE.MathUtils.clamp(sev/35, 0.08, 1);
+      if(a.isPlayer||b.isPlayer){
+        camShake=Math.max(camShake, Math.min(1, sev/45));
+        playCrashSound(vol);
+        if(sev>15) flashMsg('CONTACT','碰撞 · '+(sev*3.6|0)+'km/h');
       }
     }
   }
@@ -3836,8 +3791,12 @@ addEventListener('resize',()=>{
 });
 
 // ---------- buttons ----------
-// startBtn 已在车库系统中注册 (openGarage)
-$('retryBtn').addEventListener('click', openGarage);
+// startBtn 由 lobby.js 绑定 (单人练习 → 选赛道)
+$('retryBtn').addEventListener('click', ()=>{
+  // 联机比赛结束后返回大厅 (由 lobby.js 设置)
+  if(window.onRaceRetry){ window.onRaceRetry(); return; }
+  openGarage();
+});
 $('resumeBtn').addEventListener('click',()=>{ race.phase='racing'; ui.pauseScreen.classList.add('hidden'); });
 // 第一/第三人称切换按钮
 function toggleCam(){
