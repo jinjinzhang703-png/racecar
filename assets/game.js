@@ -1901,7 +1901,12 @@ function updatePlayer(dt){
     c.speed = Math.max(PIT_SPEED_LIMIT, c.speed - 30 * dt); // 渐进减速
   }
   // 驶入维修区并停车 → 自动开始换胎小游戏 (真实进站)
-  if(race.phase==='racing' && isInPitLane(c.pos) && Math.abs(c.speed)<2 && c.pitTimer<=0 && !pitGame.active){
+  // 仅当轮胎需要更换时触发; 每次驶入最多触发一次 (防止完成后原地死循环)
+  if(!isInPitLane(c.pos)){
+    c._pitServedThisEntry = false; // 驶出后重置
+  } else if(race.phase==='racing' && Math.abs(c.speed)<2 && c.pitTimer<=0 && !pitGame.active
+      && c.tire < 95 && !c.inReverse && !c._pitServedThisEntry){
+    c._pitServedThisEntry = true;
     startPitMiniGame();
   }
 
@@ -3166,7 +3171,8 @@ addEventListener('keydown',e=>{
   if(k==='KeyC'){ toggleCam(); }
   if(k==='KeyP'){ if(race.phase==='racing'){race.phase='paused';ui.pauseScreen.classList.remove('hidden');} else if(race.phase==='paused'){race.phase='racing';ui.pauseScreen.classList.add('hidden');} }
   if(k==='KeyQ' && race.phase==='racing' && player.pitTimer<=0 && !pitGame.active) tryPit();
-  // 换胎小游戏按键处理
+  // 换胎小游戏按键处理: ESC 取消, 字母键作答
+  if(pitGame.active && k==='Escape'){ cancelPitStop(); return; }
   if(pitGame.active) handlePitGameKey(k);
   if(k==='KeyR' && race.phase==='racing') resetPlayerToTrack();
 });
@@ -3242,8 +3248,16 @@ function updatePitGameUI(){
   // 倒计时条
   const pct = Math.max(0, pitGame.timeLeft / pitGame.timeLimit * 100);
   timer.style.width = pct + '%';
-  timer.style.background = pct > 40 ? '#00e5ff' : pct > 20 ? '#fbbf24' : '#ef4444';
+  timer.style.background = pct > 40 ? '#3ddc84' : pct > 20 ? '#ffd747' : '#e10600';
 }
+
+// 字母可点击 (鼠标/触屏): 点击任意字母 = 按下当前期望字母
+$('pitGameLetters').addEventListener('click', e=>{
+  if(!pitGame.active) return;
+  if(e.target.classList.contains('pit-letter')){
+    handlePitGameKey('Key' + pitGame.sequence[pitGame.currentIdx]);
+  }
+});
 
 function handlePitGameKey(code){
   if(!pitGame.active) return false;
@@ -3283,6 +3297,8 @@ function completePitStop(penalized){
   pitGame.active = false;
   const el = $('pitGamePanel');
   if(el) el.style.display = 'none';
+  // 清理输入状态, 防止按键残留导致车辆蹿出
+  input.acc = input.brake = input.steerLeft = input.steerRight = false;
   player.pits++;
   player.tire = 100;
   // 保留玩家选择的轮胎类型, 不硬编码为 'S'
@@ -3299,6 +3315,15 @@ function completePitStop(penalized){
   } else {
     flashMsg('PIT DONE','新胎 · ' + tireName);
   }
+}
+
+// 取消换胎 (ESC) — 不卡住玩家
+function cancelPitStop(){
+  pitGame.active = false;
+  const el = $('pitGamePanel');
+  if(el) el.style.display = 'none';
+  input.acc = input.brake = input.steerLeft = input.steerRight = false;
+  flashMsg('PIT SKIPPED','未换胎 · 直接驶出');
 }
 
 function updatePitMiniGame(dt){
