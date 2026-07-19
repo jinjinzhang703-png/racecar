@@ -139,6 +139,17 @@ function showLobby(){
   $('lobbyMode').textContent = MP.isHost
     ? (server ? '你是房主 · 玩家可直接加入' : '你是房主 · 生成邀请码发给朋友')
     : (server ? '已连接服务器 · 等待房主开赛' : '加入房间');
+  // 步骤指引 (按模式)
+  const addr = location.host.includes('localhost') || location.host.includes('127.0.0.1')
+    ? 'http://<你的局域网IP>:' + (location.port || '8000') : 'http://' + location.host;
+  $('lobbyGuide').innerHTML = MP.isHost
+    ? (server
+      ? `① 朋友在同一局域网打开 <b>${addr}</b> 点「加入房间」<br>② 等待全员 <b>READY</b> → ③ 点击 <b>START RACE</b>`
+      : `① 右侧「生成邀请码」发给朋友 → ② 朋友粘贴后把<b>应答码</b>回传给你<br>③ 粘贴应答码点「接入」→ 全员 READY 后开赛`)
+    : (server
+      ? `已连接房主 · ① 左侧「选择车辆」→ ② 点 <b>READY</b> → ③ 等房主开赛`
+      : `① 向房主索要<b>邀请码</b>并粘贴到下方 → ② 生成<b>应答码</b>回发给房主<br>③ 连接成功后选车 → 点 READY → 等房主开赛`);
+  $('myNameInput').value = myName;
   renderPlayers();
 }
 
@@ -308,19 +319,27 @@ $('readyBtn').addEventListener('click', ()=>{
   sendMyUpdate();
 });
 
-// 同步我的车辆选择/准备状态
+// 同步我的车辆选择/准备状态/名字
 function sendMyUpdate(){
   const sel = myCarSel();
   if(MP.isHost){
     const me = players.find(p=>p.id==='host');
-    if(me) Object.assign(me, sel);
+    if(me) Object.assign(me, sel, { name:myName });
     broadcastLobby();
   } else {
-    Net.send({ t:'update', ...sel, ready:myReady });
+    Net.send({ t:'update', ...sel, ready:myReady, name:myName });
     const me = players.find(p=>p.id===MP.myId);
-    if(me){ Object.assign(me, sel, {ready:myReady}); renderPlayers(); }
+    if(me){ Object.assign(me, sel, {ready:myReady, name:myName}); renderPlayers(); }
   }
 }
+
+// 名字编辑 (大厅内即时生效)
+$('myNameInput').addEventListener('change', ()=>{
+  myName = ($('myNameInput').value || (MP.isHost?'HOST':'PLAYER')).trim().toUpperCase()
+    || (MP.isHost?'HOST':'PLAYER');
+  $('myNameInput').value = myName;
+  sendMyUpdate();
+});
 
 // ============================================================
 //  大厅内车库
@@ -342,6 +361,7 @@ $('leaveLobbyBtn').addEventListener('click', ()=>location.reload());
 // ============================================================
 function setupNet(){
   Net.onPeer((gid, ev)=>{
+    if(!MP.active) return;
     if(!MP.isHost){
       if(ev==='leave' && MP.inRace){ /* 与房主断线 */ flashMsg('DISCONNECTED','与房主失去连接'); }
       return;
@@ -383,7 +403,8 @@ function handleHostMessage(fromId, m){
     }
     case 'update': {
       const p = players.find(x=>x.id===fromId);
-      if(p) Object.assign(p, { carIdx:m.carIdx, color:m.color, tire:m.tire, ready:!!m.ready });
+      if(p) Object.assign(p, { carIdx:m.carIdx, color:m.color, tire:m.tire, ready:!!m.ready,
+        name: (m.name||p.name||'').toString().toUpperCase() || p.name });
       broadcastLobby();
       break;
     }
@@ -563,5 +584,19 @@ function onMpRaceEnd(){
   else sendMyUpdate();
   showLobby();
 }
+
+// 返回主菜单 (软重置, 无需刷新页面)
+function backToMenu(){
+  MP.active = false; MP.inRace = false;
+  window.onRaceRetry = null;
+  window.onLocalFinish = null;
+  race.phase = 'menu';
+  $('hud').style.display = 'none';
+  showScreen('startScreen');
+}
+$('menuBtn').addEventListener('click', backToMenu);
+$('quitBtn').addEventListener('click', backToMenu);
+// 主菜单下隐藏 HUD (startRace 会重新显示)
+$('hud').style.display = 'none';
 
 })();

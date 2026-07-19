@@ -1509,7 +1509,7 @@ function makeCar(isPlayer, gridSlot){
     heading:Math.PI/2,
     speed:0,
     velocity:new THREE.Vector3(),
-    maxSpeed: isPlayer?82:(difficulty==='easy'?rand(72,78):difficulty==='hard'?rand(82,90):rand(78,86)),
+    maxSpeed: isPlayer?82:(difficulty==='easy'?rand(68,74):difficulty==='hard'?rand(74,81):rand(78,86)),
     accel: isPlayer?42:50,
     turnRate: isPlayer?2.2:3.0, // F1 手感: 转向速率 2.2 (报告目标值)
     sampleIdx:0, progress:0, lap:0,
@@ -1533,7 +1533,7 @@ function makeCar(isPlayer, gridSlot){
     lastSectorTimes:[null,null,null], lastLapTime:null,
     curSectorStart:0, lapStartTime:0, bestLap:null,
     finished:false, finishTime:0, pits:0,
-    aiTarget:0, aiSkill: difficulty==='easy' ? rand(0.88,0.96) : difficulty==='hard' ? rand(1.0,1.12) : rand(0.94,1.08),
+    aiTarget:0, aiSkill: difficulty==='easy' ? rand(0.82,0.90) : difficulty==='hard' ? rand(0.95,1.05) : rand(0.94,1.08),
     // 走线属性: 0=极端内侧, 1=极端外侧, 影响过弯走线偏好
     racingLineBias: rand(0.15, 0.85),
     // 走线精度: 0=很差(大变量), 1=完美
@@ -2010,8 +2010,16 @@ function updateAI(c, dt){
     const boxX = PIT_ENTRY_X + pitBoxSpacing * (c.pitBoxIdx + 1.5);
 
     if(c.pitPhase === 'entering'){
-      // 阶段1: 从主赛道驶向维修通道入口
-      const entryTarget = new THREE.Vector3(PIT_ENTRY_X + 15, 0, PIT_LANE_Z);
+      // 阶段1: 沿主赛道驶向维修通道入口 (两阶段导航, 防止斜插穿墙/掉头逆行)
+      // 错过入口 (已驶过窗口): 放弃本次进站, 下圈再决策
+      if(c.pos.x > PIT_ENTRY_X + 40){
+        c.pitting = false; c.pitPhase = null; c._pitEntryTimer = 0;
+        return;
+      }
+      const inWindow = c.pos.x < PIT_ENTRY_X + 35;
+      const entryTarget = inWindow
+        ? new THREE.Vector3(PIT_ENTRY_X + 20, 0, PIT_LANE_Z) // 窗口内: 向北驶入通道
+        : new THREE.Vector3(PIT_ENTRY_X + 20, 0, 340);        // 未到: 沿赛道驶向窗口
       const dx = entryTarget.x - c.pos.x;
       const dz = entryTarget.z - c.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -2103,18 +2111,19 @@ function updateAI(c, dt){
     const aiSteer = Math.abs(c.heading - (c._lastHeading || c.heading));
     const aiSpeedFactor = c.speed > 50 ? 0.04 : 0;
     const wear = 0.12 + (aiAccel ? 0.08 : 0) + Math.min(0.06, aiSteer) + aiSpeedFactor;
-    c.tire = Math.max(0, c.tire - wear * dt);
+    // 磨损率 ×1.6: 让 3-5 圈的比赛出现真实的进站窗口
+    c.tire = Math.max(0, c.tire - wear * 1.6 * dt);
     c.fuel = Math.max(0, c.fuel - 0.007 * dt);
     const inPitZone = (c.progress > 0.92 || c.progress < 0.08);
     const lapsLeft = totalLaps - c.lap;
     const strat = c.pitStrategy || 'balanced';
     let shouldPit = false;
     if(strat === 'aggressive'){
-      shouldPit = c.tire < 40 && inPitZone && lapsLeft > 1 && c.pits < 3;
+      shouldPit = c.tire < 40 && inPitZone && lapsLeft >= 1 && c.pits < 3;
     } else if(strat === 'conservative'){
-      shouldPit = (c.tireDegraded || c.tire < 12) && inPitZone && lapsLeft > 1 && c.pits < 3;
+      shouldPit = (c.tireDegraded || c.tire < 12) && inPitZone && lapsLeft >= 1 && c.pits < 3;
     } else {
-      shouldPit = (c.tireDegraded || c.tire < 22) && inPitZone && lapsLeft > 1 && c.pits < 3;
+      shouldPit = (c.tireDegraded || c.tire < 22) && inPitZone && lapsLeft >= 1 && c.pits < 3;
     }
     if(shouldPit){
       c.pitting = true;
@@ -2796,6 +2805,7 @@ function startRace(config){
   ui.garageScreen.classList.add('hidden');
   ui.overScreen.classList.add('hidden');
   ui.pauseScreen.classList.add('hidden');
+  const hudEl = $('hud'); if(hudEl) hudEl.style.display='';
   const mpRes = $('mpResults'); if(mpRes) mpRes.innerHTML='';
   const trackScr = $('trackScreen'); if(trackScr) trackScr.classList.add('hidden');
   const lobbyScr = $('lobbyScreen'); if(lobbyScr) lobbyScr.classList.add('hidden');

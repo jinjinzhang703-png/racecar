@@ -373,6 +373,9 @@
   .invite-slot{border:1px solid var(--line);background:var(--panel);padding:10px;margin-top:8px;clip-path:var(--cut);}
   .invite-slot .slot-title{font-size:10px;color:var(--mut);letter-spacing:.12em;margin-bottom:4px;font-weight:700;}
   .lobby-status{font-size:11px;color:var(--green);margin-top:10px;min-height:14px;}
+  .menu-hint{font-size:10px;color:var(--mut);margin:-6px 0 2px;max-width:280px;line-height:1.5;}
+  .guide-box{font-size:11px;color:var(--mut);line-height:2;margin-bottom:16px;text-align:center;}
+  .guide-box b{color:var(--ink);}
   .section-title{font-size:10px;color:var(--mut);letter-spacing:.2em;text-transform:uppercase;margin-bottom:6px;font-weight:700;}
   .lobby-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
   .name-input{background:rgba(255,255,255,.06);border:1px solid var(--line);
@@ -504,8 +507,11 @@
     </div>
     <div class="menu-btns">
       <button class="btn" id="startBtn">单人练习</button>
+      <div class="menu-hint">与 11 辆 AI 赛车同场竞技</div>
       <button class="btn ghost" id="hostBtn">创建房间 · 局域网</button>
+      <div class="menu-hint">你当房主 · 朋友打开你的地址点「加入房间」即可加入, 无需其他操作</div>
       <button class="btn ghost" id="joinBtn">加入房间</button>
+      <div class="menu-hint">加入朋友的比赛 (同一局域网自动连接; 无服务器时用邀请码)</div>
     </div>
     <div class="tips">
       <kbd>W</kbd>/<kbd>↑</kbd> 油门 · <kbd>S</kbd>/<kbd>↓</kbd> 刹车 · <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 转向<br>
@@ -586,6 +592,7 @@
   <div class="screen hidden" id="lobbyScreen">
     <div class="garage-title">LOBBY</div>
     <div class="garage-sub" id="lobbyMode">房间大厅</div>
+    <div class="guide-box" id="lobbyGuide"></div>
 
     <!-- 客人: 连接面板 -->
     <div id="joinPanel" style="display:none;max-width:520px;width:100%;text-align:left;">
@@ -608,6 +615,10 @@
         <div class="lobby-left">
           <div class="section-title">玩家</div>
           <div id="lobbyPlayers"></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span style="font-size:10px;color:var(--mut);letter-spacing:.15em;">你的名字</span>
+            <input class="name-input" id="myNameInput" maxlength="12" placeholder="PLAYER" style="width:150px;padding:6px 10px;">
+          </div>
           <div class="lobby-btns">
             <button class="btn ghost small" id="lobbyGarageBtn">选择车辆</button>
             <button class="btn ghost small" id="readyBtn" style="display:none;">READY</button>
@@ -674,7 +685,10 @@
       <div class="resItem"><div class="rl">PITS</div><div class="rv" id="pitCount">0</div></div>
     </div>
     <div id="mpResults"></div>
-    <button class="btn" id="retryBtn">RACE AGAIN</button>
+    <div style="display:flex;gap:12px;">
+      <button class="btn" id="retryBtn">再来一局</button>
+      <button class="btn ghost" id="menuBtn">返回主菜单</button>
+    </div>
   </div>
 
   <!-- Pause -->
@@ -682,6 +696,7 @@
     <div class="pauseT">PAUSED</div>
     <div class="sub">已暂停</div>
     <button class="btn" id="resumeBtn">RESUME</button>
+    <button class="btn ghost" id="quitBtn" style="margin-top:12px;">退出到主菜单</button>
   </div>
 </div>
 
