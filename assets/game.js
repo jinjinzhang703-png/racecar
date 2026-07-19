@@ -359,6 +359,20 @@ function makeChecker(){
 // ============================================================
 //  专业围栏系统: TECPRO红白块 + 轮胎墙 + 高碎片围栏
 // ============================================================
+// 维修区通道常量 (提前定义: 围墙建造需要引用开口)
+const PIT_LANE_Z = 318;       // 维修通道中心 z 坐标
+const PIT_LANE_HALF_W = 5;    // 维修通道半宽 (10m 宽)
+const PIT_ENTRY_X = -340;     // 入口 x 坐标
+const PIT_EXIT_X = 40;        // 出口 x 坐标
+const PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
+// 赛道围墙上的维修区开口 (视觉与碰撞共用): 入口/出口两段
+const PIT_WALL_GAPS = [ [-355, -310], [0, 60] ];
+// 位置是否处于维修区围墙开口 (主直道→维修通道之间 + 缺口 x 区间)
+function isPitGap(x, z){
+  if(z < 316 || z > 346) return false;
+  for(const [a, b] of PIT_WALL_GAPS){ if(x > a && x < b) return true; }
+  return false;
+}
 
 // --- TECPRO 连续墙体 (红白条纹三角带, 替代分段盒) ---
 (()=>{
@@ -388,6 +402,9 @@ function makeChecker(){
         pos.push(x, height, z);  // 顶
       }
       for(let i=0;i<NSAMP;i++){
+        // 维修区开口: 跳过缺口段 (仅 z 减小一侧的墙, 与碰撞开口一致)
+        const gp=SAMPLES[i%NSAMP], gn=sideNormalAt(i%NSAMP);
+        if(gp.z+gn.z*side*(HALF_W+offset) < gp.z-1 && isPitGap(gp.x, gp.z)) continue;
         const a=base+i*2, b=base+i*2+1, c=base+i*2+2, d=base+i*2+3;
         idx.push(a,b,c, b,d,c);
       }
@@ -450,13 +467,17 @@ function makeChecker(){
   let pi=0;
   for(let i=0;i<N;i+=4){
     const p=SAMPLES[i], n=sideNormalAt(i);
-    // Left post
-    d.position.set(p.x+n.x*(HALF_W+1.5), 2.0, p.z+n.z*(HALF_W+1.5));
-    d.rotation.y=Math.atan2(TANGENTS[i].x,TANGENTS[i].z);
-    d.updateMatrix(); mPosts.setMatrixAt(pi++,d.matrix);
+    // Left post (z 增大一侧)
+    if(!(p.z+n.z*(HALF_W+1.5) < p.z-1 && isPitGap(p.x, p.z))){
+      d.position.set(p.x+n.x*(HALF_W+1.5), 2.0, p.z+n.z*(HALF_W+1.5));
+      d.rotation.y=Math.atan2(TANGENTS[i].x,TANGENTS[i].z);
+      d.updateMatrix(); mPosts.setMatrixAt(pi++,d.matrix);
+    }
     // Right post
-    d.position.set(p.x-n.x*(HALF_W+1.5), 2.0, p.z-n.z*(HALF_W+1.5));
-    d.updateMatrix(); mPosts.setMatrixAt(pi++,d.matrix);
+    if(!(p.z-n.z*(HALF_W+1.5) < p.z-1 && isPitGap(p.x, p.z))){
+      d.position.set(p.x-n.x*(HALF_W+1.5), 2.0, p.z-n.z*(HALF_W+1.5));
+      d.updateMatrix(); mPosts.setMatrixAt(pi++,d.matrix);
+    }
   }
   mPosts.count=pi; mPosts.instanceMatrix.needsUpdate=true; mPosts.castShadow=true;
   scene.add(mPosts);
@@ -612,12 +633,8 @@ const NCARS = TEAMS.length;
 // ============================================================
 //  维修区通道 (Pit Lane) — 主直道右侧 (南侧)
 //  布局: 赛道(z=340) → 开放入口 → 内墙段(z=323~328, 有开口) → 通道(z=318) → 外墙(z=313) → 维修站(z=300)
+//  (常量与开口定义已前移至围栏系统之前)
 // ============================================================
-const PIT_LANE_Z = 318;       // 维修通道中心 z 坐标
-const PIT_LANE_HALF_W = 5;    // 维修通道半宽 (10m 宽)
-const PIT_ENTRY_X = -340;     // 入口 x 坐标
-const PIT_EXIT_X = 40;        // 出口 x 坐标
-const PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
 const pitGroup = new THREE.Group();
 
 // 维修通道地面 + 入口/出口斜道 + 墙壁 (带开口) + 维修站点
@@ -1625,7 +1642,7 @@ function barrierCollision(c){
   let collisionPoint = null;
 
   // 中心点检查
-  if(seg.absLat > WALL_DIST){
+  if(seg.absLat > WALL_DIST && !isPitGap(c.pos.x, c.pos.z)){
     const overshoot = seg.absLat - WALL_DIST;
     if(overshoot > maxOvershoot){
       maxOvershoot = overshoot;
@@ -1635,9 +1652,10 @@ function barrierCollision(c){
     }
   }
 
-  // 角点检查
+  // 角点检查 (维修区围墙开口处的角点豁免)
   const corners = getCarCorners(c);
   for(const corner of corners){
+    if(isPitGap(corner.x, corner.z)) continue;
     const cornerSeg = nearestSegment(corner);
     if(cornerSeg.absLat > WALL_DIST){
       const overshoot = cornerSeg.absLat - WALL_DIST;
@@ -1755,6 +1773,11 @@ function updatePlayer(dt){
     // 玩家锁内仍可微调转向 (保留操控感)
     const steerTarget = (input.steerLeft?1:0) - (input.steerRight?1:0);
     c.heading += steerTarget * c.turnRate * 0.3 * dt;
+    // 锁内也允许倒车计时 (撞墙后可以倒车脱困, 不会被反复碰撞打断)
+    if(c.isPlayer && race.phase==='racing' && Math.abs(c.speed)<3 && input.brake && !input.acc){
+      c.reverseTimer=(c.reverseTimer||0)+dt;
+      if(c.reverseTimer>0.4 && !c.inReverse){ c.inReverse=true; flashMsg('REVERSE','倒车模式'); }
+    }
     c.pos.addScaledVector(c.velocity, dt);
     // NaN保护
     if(isNaN(c.pos.x)||isNaN(c.pos.z)){
@@ -1830,12 +1853,12 @@ function updatePlayer(dt){
       if(dot>0.85) tow=Math.max(tow, (34-dist)/34*7);
     }
   }
-  // 倒车逻辑 (仅玩家, 比赛中): 静止时按住刹车 0.5秒切换倒车模式
+  // 倒车逻辑 (仅玩家, 比赛中): 接近静止时按住刹车 0.4秒切换倒车模式
   if(c.isPlayer && !c.isAI && race.phase==='racing'){
     // 进入倒车模式: 车辆接近静止 + 持续按刹车
-    if(Math.abs(c.speed) < 2 && input.brake && !input.acc){
+    if(Math.abs(c.speed) < 3 && input.brake && !input.acc){
       c.reverseTimer = (c.reverseTimer||0) + dt;
-      if(c.reverseTimer > 0.5 && !c.inReverse){
+      if(c.reverseTimer > 0.4 && !c.inReverse){
         c.inReverse = true;
         flashMsg('REVERSE','倒车模式');
       }
@@ -1876,6 +1899,10 @@ function updatePlayer(dt){
   // === 维修区限速: 80 km/h (22 m/s) 硬限制, 渐进减速 ===
   if(isInPitLane(c.pos) && c.speed > PIT_SPEED_LIMIT){
     c.speed = Math.max(PIT_SPEED_LIMIT, c.speed - 30 * dt); // 渐进减速
+  }
+  // 驶入维修区并停车 → 自动开始换胎小游戏 (真实进站)
+  if(race.phase==='racing' && isInPitLane(c.pos) && Math.abs(c.speed)<2 && c.pitTimer<=0 && !pitGame.active){
+    startPitMiniGame();
   }
 
   c.fuel=Math.max(0,c.fuel-(input.acc?0.012:0.004)*dt*(1+tow*0.1));
@@ -1927,16 +1954,17 @@ function updatePlayer(dt){
 
   // 围栏硬碰撞 (冲不出去) — 第一次碰撞处理
   barrierCollision(c);
-  // 二次防穿模: 检查所有角点, 任何穿透则推回
+  // 二次防穿模: 检查所有角点, 任何穿透则推回 (维修区开口豁免)
   {
     const corners2 = getCarCorners(c);
     let worstOV = 0, worstN = null, worstS = 0;
     for(const cr of corners2){
+      if(isPitGap(cr.x, cr.z)) continue;
       const cs = nearestSegment(cr);
       if(cs.absLat > WALL_DIST){ const ov = cs.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = cs.normal; worstS = Math.sign(cs.lateral); } }
     }
     const csC = nearestSegment(c.pos);
-    if(csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
+    if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
     if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (worstOV + 0.05));
   }
 
@@ -2325,16 +2353,17 @@ function updateAI(c, dt){
   c.velocity.copy(fwd).multiplyScalar(c.speed);
   c.pos.addScaledVector(c.velocity,dt);
   const collResult=barrierCollision(c);
-  // 二次防穿模: 检查所有角点, 任何穿透则推回
+  // 二次防穿模: 检查所有角点, 任何穿透则推回 (维修区开口豁免)
   {
     const corners2 = getCarCorners(c);
     let worstOV = 0, worstN = null, worstS = 0;
     for(const cr of corners2){
+      if(isPitGap(cr.x, cr.z)) continue;
       const cs = nearestSegment(cr);
       if(cs.absLat > WALL_DIST){ const ov = cs.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = cs.normal; worstS = Math.sign(cs.lateral); } }
     }
     const csC = nearestSegment(c.pos);
-    if(csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
+    if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
     if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (worstOV + 0.05));
   }
   // 撞墙: 仅在重撞时触发恢复模式, 轻擦则继续滑行
@@ -2970,15 +2999,19 @@ function updateWarnings(){
   // 速度警告 (接近弯道时速度过高)
   if(ui.speedo){
     const kph=c.speed*3.2;
-    // 检查前方弯道曲率
-    const lookAhead=Math.min(30, Math.floor(c.speed*0.8));
-    const futureIdx=(c.sampleIdx+lookAhead)%NSAMP;
-    const ahead=TANGENTS[futureIdx];
-    const cur=TANGENTS[c.sampleIdx];
-    const curveDot=ahead.x*cur.x+ahead.z*cur.z;
-    const isCorner=curveDot<0.95; // 前方有弯道
-    const tooFast=isCorner && kph>180;
-    ui.speedo.classList.toggle('speedWarn', tooFast);
+    // 检查前方弯道曲率 (sampleIdx 非法时跳过, 防止 TANGENTS[NaN] 崩溃)
+    const baseIdx = (((c.sampleIdx|0) % NSAMP) + NSAMP) % NSAMP;
+    const lookAhead=Math.min(30, Math.floor(Math.abs(c.speed)*0.8));
+    const ahead=TANGENTS[(baseIdx+lookAhead)%NSAMP];
+    const cur=TANGENTS[baseIdx];
+    if(!ahead || !cur){
+      ui.speedo.classList.remove('speedWarn');
+    } else {
+      const curveDot=ahead.x*cur.x+ahead.z*cur.z;
+      const isCorner=curveDot<0.95; // 前方有弯道
+      const tooFast=isCorner && kph>180;
+      ui.speedo.classList.toggle('speedWarn', tooFast);
+    }
   }
 }
 
