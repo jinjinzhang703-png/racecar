@@ -1729,13 +1729,8 @@ function updatePlayer(dt){
     c.speed=0; c.velocity.set(0,0,0); c.angularVel=0;
     applyMesh(c); return;
   }
-  // 撞墙翻滚中 (0.3秒)
-  if(c.crashTimer>0){
-    c.crashTimer-=dt;
-    c.speed=0; c.velocity.multiplyScalar(0.5);
-    if(c.crashTimer<=0){ c.crashAngle=0; }
-    applyMesh(c); return;
-  }
+  // 注意: 碰撞后不再冻结车辆 (真实世界: 车带剩余动量继续滑行/打转),
+  // crashTimer 仅为视觉翻滚动画, 在 loop 中统一计时
   // 碰撞锁定: 挂起正常速度重建, 让反弹真正积分
   if(c.collisionLock > 0){
     c.collisionLock -= dt;
@@ -1952,11 +1947,7 @@ function updateAI(c, dt){
     c.speed=0; c.velocity.set(0,0,0);
   }
 
-  if(c.crashTimer>0){
-    c.crashTimer-=dt; c.speed=0;
-    if(c.crashTimer<=0){ c.crashAngle=0; c.recoveryMode=true; c.recoveryTimer=1.5; }
-    applyMesh(c); updateProgress(c,dt); return;
-  }
+  // 注意: AI 碰撞后同样不冻结 (见 updatePlayer 注释), crashTimer 在 loop 统一计时
   // 碰撞锁定: 挂起 AI 速度重建, 让反弹真正积分
   if(c.collisionLock > 0){
     c.collisionLock -= dt;
@@ -3634,6 +3625,16 @@ function loop(){
     }
     if(typeof window.MPraceTick==='function') window.MPraceTick(dt); // 联机状态广播 (20Hz)
     try{ carCollisions(); } catch(e){}
+    // 碰撞翻滚动画计时 (纯视觉, 不冻结车辆); AI 翻滚结束后进入恢复模式
+    for(const c of cars){
+      if(c.crashTimer>0){
+        c.crashTimer-=dt;
+        if(c.crashTimer<=0){
+          c.crashTimer=0; c.crashAngle=0;
+          if(!c.isPlayer && !c.isRemote){ c.recoveryMode=true; c.recoveryTimer=1.5; }
+        }
+      }
+    }
     updateDRS();
     maxKph=Math.max(maxKph, player.speed*3.2);
     // 玩家轮胎消耗: 降速以匹配 3-4 圈寿命

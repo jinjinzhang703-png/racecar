@@ -30,11 +30,11 @@ const Net = (function(){
     return JSON.parse(decodeURIComponent(escape(atob(code))));
   }
 
-  // 等待 ICE gathering 完成 (3s 超时兜底, 避免卡死)
+  // 等待 ICE gathering 完成 (6s 超时兜底; mDNS 候选收集较慢, 太短会导致连接失败)
   function waitIce(conn){
     return new Promise(res=>{
       if(conn.iceGatheringState==='complete') return res();
-      const to = setTimeout(res, 3000);
+      const to = setTimeout(res, 6000);
       conn.addEventListener('icegatheringstatechange', ()=>{
         if(conn.iceGatheringState==='complete'){ clearTimeout(to); res(); }
       });

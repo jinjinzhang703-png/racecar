@@ -148,7 +148,7 @@ try{
   await guest.eval(`document.getElementById('guestNameInput').value='TESTER'`);
   await guest.eval(`document.getElementById('offerInput').value=${JSON.stringify(offer)}`);
   await guest.eval(`document.getElementById('genAnswerBtn').click()`);
-  await waitFor(guest, `document.getElementById('answerOutput').value.length>100`, 10000, '应答码生成');
+  await waitFor(guest, `document.getElementById('answerOutput').value.length>100`, 25000, '应答码生成');
   const answer = await guest.eval(`document.getElementById('answerOutput').value`);
   check('应答码已生成', answer.length>100, answer.length+'字符');
 
