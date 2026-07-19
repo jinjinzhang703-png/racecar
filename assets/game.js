@@ -1830,8 +1830,8 @@ function updatePlayer(dt){
       if(dot>0.85) tow=Math.max(tow, (34-dist)/34*7);
     }
   }
-  // 倒车逻辑 (仅玩家): 静止时按住刹车 0.5秒切换倒车模式
-  if(c.isPlayer && !c.isAI){
+  // 倒车逻辑 (仅玩家, 比赛中): 静止时按住刹车 0.5秒切换倒车模式
+  if(c.isPlayer && !c.isAI && race.phase==='racing'){
     // 进入倒车模式: 车辆接近静止 + 持续按刹车
     if(Math.abs(c.speed) < 2 && input.brake && !input.acc){
       c.reverseTimer = (c.reverseTimer||0) + dt;
@@ -1839,6 +1839,9 @@ function updatePlayer(dt){
         c.inReverse = true;
         flashMsg('REVERSE','倒车模式');
       }
+    } else if(!c.inReverse){
+      // 松开刹车/给油即清零, 防止多次点刹累积误入倒车
+      c.reverseTimer = 0;
     }
     // 退出倒车模式: 按油门 或 前进速度足够
     if(input.acc || c.speed > 3){
@@ -1855,6 +1858,10 @@ function updatePlayer(dt){
         if(Math.abs(c.speed) < 0.5) c.speed = 0;
       }
     }
+  } else if(c.inReverse){
+    // 非 racing 阶段 (暂停/结束) 强制退出倒车
+    c.inReverse = false;
+    c.reverseTimer = 0;
   }
   // 轮胎类型速度加成: Soft +12%, 衰减乘数, 爆胎限速 40%
   const blowoutLimit = c.tire <= 0 ? 0.4 : 1.0;
@@ -3358,48 +3365,67 @@ function endRace(){
 let maxKph=0;
 
 // ============================================================
-//  引擎音效系统 (Web Audio API)
+//  音效系统 (Web Audio API) — 引擎/风噪/轮胎啸叫/碰撞
+//  引擎: 锯齿+方波失谐+次谐波正弦 → 低通 → 压缩器 (F1 高转尖叫+低转厚重)
 // ============================================================
-let audioCtx=null, engineOsc=null, engineGain=null, engineFilter=null;
-let tireScreechOsc=null, tireScreechGain=null, tireScreechFilter=null;
-let audioInitialized=false;
+let audioCtx=null, audioInitialized=false, audioMaster=null;
+let engOsc1=null, engOsc2=null, engSub=null, engFilter=null, engGain=null;
+let windSrc=null, windFilter=null, windGain=null;
+let tireSrc=null, tireFilter=null, tireGain=null;
+let crackleTimer=0;
+
+function makeNoiseBuffer(ctx, seconds){
+  const buf=ctx.createBuffer(1, Math.floor(ctx.sampleRate*seconds), ctx.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  return buf;
+}
 
 function initAudio(){
   if(audioInitialized) return;
   try{
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    // 引擎振荡器 (锯齿波 = 引擎声)
-    engineOsc=audioCtx.createOscillator();
-    engineOsc.type='sawtooth';
-    engineOsc.frequency.value=80; // 怠速
-    // 低通滤波器 (模拟引擎闷声)
-    engineFilter=audioCtx.createBiquadFilter();
-    engineFilter.type='lowpass';
-    engineFilter.frequency.value=400;
-    engineFilter.Q.value=5;
-    // 增益控制
-    engineGain=audioCtx.createGain();
-    engineGain.gain.value=0;
-    // 连接: 振荡器 → 滤波器 → 增益 → 输出
-    engineOsc.connect(engineFilter);
-    engineFilter.connect(engineGain);
-    engineGain.connect(audioCtx.destination);
-    engineOsc.start();
+    // 主压缩器: 粘合各声部, 防止削波
+    audioMaster=audioCtx.createDynamicsCompressor();
+    audioMaster.threshold.value=-18;
+    audioMaster.ratio.value=4;
+    audioMaster.connect(audioCtx.destination);
 
-    // === 轮胎啸叫声 (方波+带通滤波) ===
-    tireScreechOsc=audioCtx.createOscillator();
-    tireScreechOsc.type='square';
-    tireScreechOsc.frequency.value=1200;
-    tireScreechFilter=audioCtx.createBiquadFilter();
-    tireScreechFilter.type='bandpass';
-    tireScreechFilter.frequency.value=1500;
-    tireScreechFilter.Q.value=8;
-    tireScreechGain=audioCtx.createGain();
-    tireScreechGain.gain.value=0;
-    tireScreechOsc.connect(tireScreechFilter);
-    tireScreechFilter.connect(tireScreechGain);
-    tireScreechGain.connect(audioCtx.destination);
-    tireScreechOsc.start();
+    // === 引擎: 三声部 → 低通 → 增益 → 压缩器 ===
+    engFilter=audioCtx.createBiquadFilter();
+    engFilter.type='lowpass'; engFilter.frequency.value=400; engFilter.Q.value=2.5;
+    engGain=audioCtx.createGain(); engGain.gain.value=0;
+    engFilter.connect(engGain); engGain.connect(audioMaster);
+    // 基频 (锯齿)
+    engOsc1=audioCtx.createOscillator(); engOsc1.type='sawtooth'; engOsc1.frequency.value=80;
+    // 二次谐波 (方波, 失谐, 增加厚度)
+    engOsc2=audioCtx.createOscillator(); engOsc2.type='square'; engOsc2.frequency.value=160;
+    const g2=audioCtx.createGain(); g2.gain.value=0.35;
+    // 次谐波 (正弦, 低频重量感)
+    engSub=audioCtx.createOscillator(); engSub.type='sine'; engSub.frequency.value=40;
+    const gSub=audioCtx.createGain(); gSub.gain.value=0.55;
+    engOsc1.connect(engFilter);
+    engOsc2.connect(g2); g2.connect(engFilter);
+    engSub.connect(gSub); gSub.connect(engFilter);
+    engOsc1.start(); engOsc2.start(); engSub.start();
+
+    // === 风噪: 循环噪声 → 带通 → 增益 (随速度) ===
+    windSrc=audioCtx.createBufferSource();
+    windSrc.buffer=makeNoiseBuffer(audioCtx, 2); windSrc.loop=true;
+    windFilter=audioCtx.createBiquadFilter();
+    windFilter.type='bandpass'; windFilter.frequency.value=500; windFilter.Q.value=0.6;
+    windGain=audioCtx.createGain(); windGain.gain.value=0;
+    windSrc.connect(windFilter); windFilter.connect(windGain); windGain.connect(audioMaster);
+    windSrc.start();
+
+    // === 轮胎啸叫: 噪声 → 带通(随滑移扫频) → 增益 ===
+    tireSrc=audioCtx.createBufferSource();
+    tireSrc.buffer=makeNoiseBuffer(audioCtx, 2); tireSrc.loop=true;
+    tireFilter=audioCtx.createBiquadFilter();
+    tireFilter.type='bandpass'; tireFilter.frequency.value=1100; tireFilter.Q.value=6;
+    tireGain=audioCtx.createGain(); tireGain.gain.value=0;
+    tireSrc.connect(tireFilter); tireFilter.connect(tireGain); tireGain.connect(audioMaster);
+    tireSrc.start();
 
     audioInitialized=true;
   } catch(e){ console.warn('Audio init failed:', e); }
@@ -3408,6 +3434,8 @@ function initAudio(){
 // 播放碰撞音效
 function playCrashSound(intensity){
   if(!audioInitialized || !audioCtx) return;
+  if(!isFinite(intensity)) intensity=0.3; // NaN 防护
+  intensity=THREE.MathUtils.clamp(intensity,0,1);
   const now=audioCtx.currentTime;
   // 白噪声 + 低通 = 撞击声
   const bufferSize=audioCtx.sampleRate * 0.15;
@@ -3427,27 +3455,44 @@ function playCrashSound(intensity){
   gain.gain.exponentialRampToValueAtTime(0.001, now+0.15);
   noise.connect(filter);
   filter.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(audioMaster || audioCtx.destination);
   noise.start(now);
   noise.stop(now+0.15);
 }
 
+// 收油爆震 (overrun crackle): 高转速松油门时的排气放炮
+function playCrackle(vol){
+  if(!audioInitialized || !audioCtx) return;
+  const t=audioCtx.currentTime;
+  const src=audioCtx.createBufferSource();
+  src.buffer=windSrc.buffer; // 复用风噪缓冲
+  const f=audioCtx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
+  const g=audioCtx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.06);
+  src.connect(f); f.connect(g); g.connect(audioMaster || audioCtx.destination);
+  src.start(t, Math.random()*1.5, 0.06);
+}
+
 // 更新轮胎啸叫声
 function updateTireSound(slipAmount){
-  if(!audioInitialized || !audioCtx || !tireScreechGain) return;
+  if(!audioInitialized || !audioCtx || !tireGain) return;
   if(!isFinite(slipAmount)) slipAmount=0; // NaN 防护
-  const targetVol = Math.max(0, Math.min(0.15, slipAmount * 0.25));
-  tireScreechGain.gain.linearRampToValueAtTime(targetVol, audioCtx.currentTime+0.05);
-  // 频率随滑移量变化
-  const freq = 800 + slipAmount * 600;
-  tireScreechOsc.frequency.linearRampToValueAtTime(freq, audioCtx.currentTime+0.05);
+  const t=audioCtx.currentTime;
+  const vol=Math.max(0, Math.min(0.12, slipAmount*0.2));
+  tireGain.gain.linearRampToValueAtTime(vol, t+0.05);
+  // 啸叫频率随滑移量升高 (900Hz → 1600Hz)
+  tireFilter.frequency.linearRampToValueAtTime(900+slipAmount*700, t+0.05);
 }
 
 function updateEngineSound(){
   if(!audioInitialized || !audioCtx || !player) return;
-  // 暂停/菜单时静音
+  const t=audioCtx.currentTime;
+  // 暂停/菜单时全部静音
   if(race.phase!=='racing' && race.phase!=='grid'){
-    engineGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime+0.1);
+    engGain.gain.linearRampToValueAtTime(0, t+0.1);
+    windGain.gain.linearRampToValueAtTime(0, t+0.1);
+    tireGain.gain.linearRampToValueAtTime(0, t+0.1);
     return;
   }
   const c=player;
@@ -3455,15 +3500,28 @@ function updateEngineSound(){
   let rpm=c.rpm;
   if(!isFinite(rpm)) rpm=3000;
   rpm=THREE.MathUtils.clamp(rpm,0,16000);
-  // 频率: 80Hz(怠速) → 400Hz(红线)
-  const freq=80+rpm/15000*320;
-  engineOsc.frequency.linearRampToValueAtTime(freq, audioCtx.currentTime+0.05);
-  // 滤波器: 随RPM升高而开放
-  const filterFreq=300+rpm/15000*1200;
-  engineFilter.frequency.linearRampToValueAtTime(filterFreq, audioCtx.currentTime+0.05);
-  // 音量: 随油门和RPM变化
-  const targetVol=0.08+rpm/15000*0.12+(input.acc?0.05:0);
-  engineGain.gain.linearRampToValueAtTime(Math.min(targetVol, 0.25), audioCtx.currentTime+0.05);
+  const rn=rpm/15000;
+  // 基频: 70Hz(怠速) → 430Hz(红线), 略指数化更像高转机
+  const f=70+Math.pow(rn,0.9)*360;
+  engOsc1.frequency.linearRampToValueAtTime(f, t+0.05);
+  engOsc2.frequency.linearRampToValueAtTime(f*2.02, t+0.05); // 二次谐波失谐
+  engSub.frequency.linearRampToValueAtTime(Math.max(30, f*0.5), t+0.05);
+  // 滤波器: 随 RPM 和油门负载开放
+  engFilter.frequency.linearRampToValueAtTime(250+rn*1800+(input.acc?300:0), t+0.05);
+  // 音量: 怠速低沉, 随 RPM+油门增大
+  const vol=Math.min(0.05+rn*0.11+(input.acc?0.07:0), 0.23);
+  engGain.gain.linearRampToValueAtTime(vol, t+0.05);
+  // 风噪 ∝ 速度² (高速呼啸)
+  const spd=isFinite(c.speed)?Math.abs(c.speed):0;
+  const wvol=Math.min(0.10, (spd/82)*(spd/82)*0.10);
+  windGain.gain.linearRampToValueAtTime(wvol, t+0.1);
+  windFilter.frequency.linearRampToValueAtTime(400+spd*6, t+0.1);
+  // 收油爆震: 高转速松油门随机放炮
+  crackleTimer-=1/60;
+  if(!input.acc && rpm>9000 && crackleTimer<=0){
+    crackleTimer=0.05+Math.random()*0.12;
+    playCrackle(0.03+Math.random()*0.05);
+  }
 }
 
 // 首次交互时初始化音频

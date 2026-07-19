@@ -63,6 +63,8 @@ $('toGarageBtn').addEventListener('click', ()=>{
 // ============================================================
 //  联机状态
 // ============================================================
+// 页面加载时即探测服务器模式 (点击时无需等待)
+const serverReady = Net.serverAvailable(1500);
 const MP = window.MP = { active:false, isHost:false, inRace:false, myId:null };
 let myName = 'HOST';
 let players = [];   // {id,name,carIdx,color,tire,ready,slot} — 房主权威
@@ -149,7 +151,7 @@ function wsUrl(){
 
 $('hostBtn').addEventListener('click', async ()=>{
   // 优先: 服务器模式 (node serve.mjs, 免邀请码)
-  if(await Net.serverAvailable()){
+  if(await serverReady){
     try{
       MP.active = true; MP.isHost = true; myName = 'HOST';
       setupNet();
@@ -253,7 +255,7 @@ $('hostStartBtn').addEventListener('click', ()=>{
 // ============================================================
 $('joinBtn').addEventListener('click', async ()=>{
   // 优先: 服务器模式 (免邀请码, 直接进大厅)
-  if(await Net.serverAvailable()){
+  if(await serverReady){
     try{
       MP.active = true; MP.isHost = false;
       setupNet();

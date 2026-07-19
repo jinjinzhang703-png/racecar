@@ -144,7 +144,10 @@ const server = http.createServer(async (req, res)=>{
     const file = path.join(ROOT, p);
     if(!file.startsWith(ROOT)) throw new Error('forbidden');
     const data = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Cache-Control': 'no-cache', // 始终重新验证, 避免旧版本残留
+    });
     res.end(data);
   }catch{
     if(!res.headersSent) res.writeHead(404);

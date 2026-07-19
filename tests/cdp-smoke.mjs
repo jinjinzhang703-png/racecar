@@ -138,7 +138,9 @@ try{
   await waitFor(guest, 'window.__gameOK===true', 20000);
 
   await host.eval(`document.getElementById('hostBtn').click()`);
-  check('房主进入大厅', await host.eval(`!document.getElementById('lobbyScreen').classList.contains('hidden') && document.getElementById('hostSettings').style.display==='block'`));
+  // 无 /ws 时服务器探测需 ~1.5s 才回退手动模式, 等待大厅出现
+  await waitFor(host, `!document.getElementById('lobbyScreen').classList.contains('hidden') && document.getElementById('hostSettings').style.display==='block'`, 10000, '房主进入大厅');
+  check('房主进入大厅', true);
   await host.eval(`document.getElementById('genInviteBtn').click()`);
   await waitFor(host, `document.querySelector('#inviteSlots textarea') && document.querySelector('#inviteSlots textarea').value.length>100`, 20000, '邀请码生成');
   const offer = await host.eval(`document.querySelector('#inviteSlots textarea').value`);
