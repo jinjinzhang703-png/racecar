@@ -7,231 +7,248 @@
 <title>MARINA BAY · 新加坡夜赛 3D</title>
 <style>
   :root{
-    --bg:#05080f;
-    --ink:#e8f7ff;
-    --muted:#7d8caa;
-    --rule:#1a2740;
-    --accent:#00e5ff;
-    --accent2:#ff2bd6;
-    --soft:#ffee00;
-    --danger:#ff3355;
-    --green:#22ff88;
-    --purple:#cc66ff;
-    --glass:rgba(5,12,22,.7);
-    --glass2:rgba(5,12,22,.85);
+    --carbon:#15151e;
+    --carbon2:#1c1c26;
+    --panel:rgba(18,18,26,.92);
+    --ink:#ffffff;
+    --mut:#9a9aa5;
+    --line:rgba(255,255,255,.12);
+    --red:#e10600;
+    --red-dk:#a80500;
+    --purple:#c042ff;
+    --green:#3ddc84;
+    --yellow:#ffd747;
+    --blue:#4a9eff;
+    --bronze:#cd7f32;
+    --texture:repeating-linear-gradient(45deg,rgba(255,255,255,.014) 0 2px,transparent 2px 6px);
+    --cut:polygon(0 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%);
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
-    font-family:'Rajdhani','Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;user-select:none;}
+  html,body{height:100%;background:var(--carbon);color:var(--ink);overflow:hidden;
+    font-family:'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;user-select:none;}
   #stage{position:relative;width:100vw;height:100vh;}
   canvas{display:block;width:100%;height:100%;}
 
-  /* ===== HUD (专业赛车风格) ===== */
+  /* ===== 通用面板 (碳纤 + 斜切角) ===== */
+  .gp{background:var(--panel);background-image:var(--texture);border:1px solid var(--line);
+    clip-path:var(--cut);}
+
+  .lab{color:var(--mut);font-size:9px;letter-spacing:.18em;text-transform:uppercase;margin-bottom:1px;}
+
+  /* ===== HUD ===== */
   #hud{position:absolute;inset:0;pointer-events:none;z-index:10;font-weight:700;
     font-variant-numeric:tabular-nums;}
 
-  /* ---- 通用面板 ---- */
-  .gp{background:var(--glass);border:1px solid var(--rule);border-radius:6px;
-    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
-
-  /* ---- 左上: 圈数/排名 ---- */
-  #tl{position:absolute;top:12px;left:12px;display:flex;gap:6px;}
-  #tl .gp{text-align:center;padding:6px 14px;min-width:64px;}
-  .lab{color:var(--muted);font-size:8px;letter-spacing:.2em;text-transform:uppercase;margin-bottom:2px;}
-  .big{font-size:24px;line-height:1;}
-  #lapBig{color:var(--accent);}
-  .slash{color:var(--muted);font-size:13px;}
-  #posBig{color:var(--soft);}
-  #posTotal{color:var(--muted);font-size:12px;}
+  /* ---- 左上: 圈数/排名 (转播卡片) ---- */
+  #tl{position:absolute;top:14px;left:14px;display:flex;gap:8px;}
+  #tl .gp{padding:7px 16px 8px;min-width:70px;border-left:3px solid var(--red);}
+  .big{font-size:25px;line-height:1.05;font-weight:800;}
+  #lapBig{color:var(--ink);}
+  .slash{color:var(--mut);font-size:13px;font-weight:600;}
+  #posBig{color:var(--ink);}
+  #posTotal{color:var(--mut);font-size:12px;}
 
   /* ---- 顶部中央: 赛事信息 ---- */
   #tc{position:absolute;top:12px;left:50%;transform:translateX(-50%);text-align:center;}
-  #flag{font-size:26px;line-height:1;display:none;}
-  #flag.yellow{color:var(--soft);display:block;animation:blink 1s steps(2) infinite;}
-  #flag.check{color:var(--muted);display:block;font-size:30px;}
-  @keyframes blink{50%{opacity:.35;}}
-  #raceInfo{font-size:10px;color:var(--muted);letter-spacing:.12em;margin-top:2px;}
-  #driverInfo{font-size:11px;color:var(--accent);font-weight:700;margin-top:2px;letter-spacing:.05em;}
+  #flag{font-size:13px;font-weight:800;letter-spacing:.15em;display:none;padding:4px 22px;}
+  #flag.yellow{color:#15151e;background:var(--yellow);display:inline-block;}
+  #flag.check{color:#15151e;display:inline-block;font-size:15px;
+    background:repeating-conic-gradient(#fff 0 25%,#15151e 0 50%) 0 0/12px 12px,#fff;
+    -webkit-text-fill-color:transparent;background-clip:text;}
+  #raceInfo{font-size:10px;color:var(--mut);letter-spacing:.12em;margin-top:3px;}
+  #driverInfo{font-size:12px;color:var(--ink);font-weight:700;margin-top:2px;letter-spacing:.04em;}
+  #lapTimer{font-weight:800;}
 
   /* ---- 右上: 小地图 ---- */
-  #tr{position:absolute;top:12px;right:12px;}
-  #miniWrap{background:var(--glass);border:1px solid var(--rule);border-radius:8px;padding:6px;
-    backdrop-filter:blur(8px);}
-  #minimap{display:block;width:140px;height:140px;border-radius:4px;}
-  #miniLabel{font-size:8px;color:var(--muted);text-align:center;margin-top:3px;letter-spacing:.15em;}
+  #tr{position:absolute;top:14px;right:14px;}
+  #miniWrap{background:var(--panel);border:1px solid var(--line);padding:6px;clip-path:var(--cut);}
+  #minimap{display:block;width:140px;height:140px;}
+  #miniLabel{font-size:8px;color:var(--mut);text-align:center;margin-top:3px;letter-spacing:.18em;}
 
-  /* ---- 左侧: 计时段 ---- */
-  #bl{position:absolute;top:50%;left:12px;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;}
-  .sect{padding:5px 10px;min-width:68px;text-align:center;}
-  .sect .sname{font-size:8px;color:var(--muted);letter-spacing:.1em;}
-  .sect .stime{font-size:13px;margin-top:1px;}
+  /* ---- 左侧: 计时段 (F1 三色块) ---- */
+  #bl{position:absolute;top:50%;left:14px;transform:translateY(-50%);display:flex;flex-direction:column;gap:5px;}
+  .sect{padding:5px 10px;min-width:72px;text-align:left;border-left:3px solid var(--line);}
+  .sect .sname{font-size:9px;color:var(--mut);letter-spacing:.12em;font-weight:800;}
+  .sect .stime{font-size:13px;margin-top:1px;color:var(--ink);}
+  .sect.purple{border-left-color:var(--purple);}
   .sect.purple .stime{color:var(--purple);}
+  .sect.green{border-left-color:var(--green);}
   .sect.green .stime{color:var(--green);}
-  .sect.yellow .stime{color:var(--soft);}
+  .sect.yellow{border-left-color:var(--yellow);}
+  .sect.yellow .stime{color:var(--yellow);}
 
-  /* ---- 底部中央: 速度仪表 (巅峰极速风格) ---- */
-  #bc{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);text-align:center;width:300px;}
-  /* 速度+档位行 */
-  .speedRow{display:flex;align-items:flex-end;justify-content:center;gap:12px;}
-  #speedo{font-size:52px;font-weight:900;line-height:.9;color:var(--ink);
-    text-shadow:0 0 20px rgba(0,229,255,.3);}
-  #speedUnit{font-size:10px;color:var(--muted);letter-spacing:.15em;margin-bottom:6px;}
-  #gear{font-size:36px;font-weight:900;color:var(--accent2);line-height:.85;
-    text-shadow:0 0 18px rgba(255,43,214,.4);min-width:32px;}
+  /* ---- 底部中央: 速度/档位/RPM ---- */
+  #bc{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);text-align:center;width:320px;}
+  .speedRow{display:flex;align-items:flex-end;justify-content:center;gap:14px;}
+  #speedo{font-size:56px;font-weight:800;line-height:.9;color:var(--ink);}
+  #speedUnit{font-size:10px;color:var(--mut);letter-spacing:.18em;margin-bottom:6px;}
+  #gear{font-size:30px;font-weight:800;color:var(--ink);line-height:1;min-width:44px;
+    background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--red);
+    padding:5px 8px;clip-path:var(--cut);}
 
-  /* RPM 横向条 (像巅峰极速转速表) */
-  #rpmWrap{margin-top:6px;display:flex;align-items:center;gap:6px;}
-  #rpmLabel{font-size:8px;color:var(--muted);letter-spacing:.1em;}
-  #rpmTrack{flex:1;height:16px;background:rgba(255,255,255,.06);border-radius:3px;
-    overflow:hidden;position:relative;border:1px solid var(--rule);}
-  #rpmFill{height:100%;width:0%;transition:width .05s linear;border-radius:2px;
-    background:linear-gradient(90deg,var(--green) 0%,var(--green) 40%,var(--soft) 55%,var(--danger) 80%);}
+  /* RPM 横条 */
+  #rpmWrap{margin-top:7px;display:flex;align-items:center;gap:6px;}
+  #rpmLabel{font-size:9px;color:var(--mut);letter-spacing:.12em;font-weight:800;}
+  #rpmTrack{flex:1;height:14px;background:rgba(255,255,255,.06);
+    overflow:hidden;position:relative;border:1px solid var(--line);}
+  #rpmFill{height:100%;width:0%;transition:width .05s linear;
+    background:linear-gradient(90deg,var(--green) 0%,var(--green) 45%,var(--yellow) 62%,var(--red) 85%);}
   #rpmBar{display:flex;gap:1px;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
-  .led{flex:1;height:100%;border-right:1px solid rgba(0,0,0,.3);}
+  .led{flex:1;height:100%;border-right:1px solid rgba(0,0,0,.4);}
   .led.on.g{background:var(--green);}
-  .led.on.y{background:var(--soft);}
-  .led.on.r{background:var(--danger);box-shadow:0 0 4px var(--danger);}
-  #rpmVal{font-size:9px;color:var(--muted);min-width:38px;text-align:right;}
+  .led.on.y{background:var(--yellow);}
+  .led.on.r{background:var(--red);animation:ledFlash .25s steps(2) infinite;}
+  @keyframes ledFlash{50%{opacity:.4;}}
+  #rpmVal{font-size:10px;color:var(--mut);min-width:42px;text-align:right;}
 
-  /* ---- 右下: 状态条 + 控制 ---- */
-  #br{position:absolute;bottom:16px;right:12px;width:175px;display:flex;flex-direction:column;gap:5px;}
-  .statRow{display:flex;align-items:center;gap:7px;padding:4px 8px;}
-  .statRow .sl{font-size:8px;color:var(--muted);width:30px;letter-spacing:.08em;}
-  .bar{flex:1;height:8px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
-  .fill{height:100%;transition:width .1s linear;border-radius:3px;}
-  #tireFill{background:linear-gradient(90deg,var(--danger),var(--soft),var(--green));}
-  #ersFill{background:linear-gradient(90deg,var(--accent),var(--accent2));}
-  #fuelFill{background:var(--accent2);}
-  .sv{font-size:9px;width:32px;text-align:right;}
+  /* ---- 右下: 车辆状态 ---- */
+  #br{position:absolute;bottom:16px;right:14px;width:185px;display:flex;flex-direction:column;gap:5px;}
+  .statRow{display:flex;align-items:center;gap:8px;padding:5px 10px;}
+  .statRow .sl{font-size:9px;color:var(--mut);width:34px;letter-spacing:.1em;font-weight:800;}
+  .bar{flex:1;height:5px;background:rgba(255,255,255,.08);overflow:hidden;}
+  .fill{height:100%;transition:width .1s linear;}
+  #tireFill{background:var(--green);}
+  #ersFill{background:var(--blue);}
+  #fuelFill{background:var(--mut);}
+  .sv{font-size:10px;width:36px;text-align:right;color:var(--ink);}
+  /* 轮胎配方徽章 (真实配方色) */
+  #tireTypeBadge{display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:18px;font-size:11px;font-weight:800;border-radius:50%;
+    background:#e10600;color:#fff;flex-shrink:0;}
 
-  /* DRS */
-  #drsBox{font-size:10px;text-align:center;padding:5px;border-radius:5px;
-    border:1px solid var(--rule);color:var(--muted);letter-spacing:.15em;font-weight:800;}
-  #drsBox.avail{color:#05080f;background:var(--soft);border-color:var(--soft);animation:pulse 1s infinite;}
-  #drsBox.active{color:#05080f;background:var(--green);border-color:var(--green);}
-  @keyframes pulse{50%{opacity:.55;}}
+  /* DRS 状态灯 */
+  #drsBox{font-size:11px;text-align:center;padding:6px;font-weight:800;letter-spacing:.18em;
+    color:var(--mut);border:1px solid var(--line);background:var(--panel);clip-path:var(--cut);}
+  #drsBox.avail{color:#15151e;background:var(--yellow);border-color:var(--yellow);}
+  #drsBox.active{color:#fff;background:#0a8a4d;border-color:#0a8a4d;}
 
   /* 相机按钮 */
-  #camBtn{pointer-events:auto;font-size:10px;letter-spacing:.1em;color:var(--accent);
-    font-weight:800;padding:7px;background:rgba(0,229,255,.08);border:1px solid var(--accent);
-    border-radius:5px;cursor:pointer;width:100%;transition:all .15s;display:flex;align-items:center;
-    justify-content:center;gap:6px;}
-  #camBtn:hover{background:rgba(0,229,255,.2);}
-  #camBtn:active{transform:scale(.95);}
-  .camIcon{font-size:14px;}
+  #camBtn{pointer-events:auto;font-size:10px;letter-spacing:.12em;color:var(--ink);
+    font-weight:700;padding:7px;background:var(--panel);border:1px solid var(--line);
+    cursor:pointer;width:100%;transition:background .15s;display:flex;align-items:center;
+    justify-content:center;gap:6px;clip-path:var(--cut);}
+  #camBtn:hover{background:#2a2a38;}
+  #camBtn:active{transform:scale(.97);}
+  .camIcon{font-size:13px;}
 
-  /* ---- 左下: 方向盘/G力指示 ---- */
-  #ll{position:absolute;bottom:16px;left:12px;display:flex;flex-direction:column;gap:6px;width:120px;}
-  .steerInd{padding:4px 8px;}
-  .steerInd .sl{font-size:8px;color:var(--muted);letter-spacing:.1em;}
-  #steerBar{position:relative;height:6px;background:rgba(255,255,255,.06);border-radius:3px;margin-top:3px;}
-  #steerDot{position:absolute;top:-2px;left:50%;width:4px;height:10px;background:var(--accent);
-    border-radius:2px;transform:translateX(-50%);transition:left .05s;box-shadow:0 0 6px var(--accent);}
-  /* G力指示 */
-  .gInd{padding:4px 8px;display:flex;align-items:center;gap:6px;}
-  .gInd .sl{font-size:8px;color:var(--muted);letter-spacing:.1em;}
-  #gBar{position:relative;flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;}
-  #gDot{position:absolute;top:-2px;left:50%;width:4px;height:10px;background:var(--soft);
-    border-radius:2px;transform:translateX(-50%);transition:left .05s;}
-  #gVal{font-size:9px;color:var(--ink);min-width:28px;text-align:right;}
+  /* ---- 左下: 方向盘/G力 ---- */
+  #ll{position:absolute;bottom:16px;left:14px;display:flex;flex-direction:column;gap:6px;width:124px;}
+  .steerInd{padding:5px 10px;}
+  .steerInd .sl{font-size:9px;color:var(--mut);letter-spacing:.12em;font-weight:800;}
+  #steerBar{position:relative;height:5px;background:rgba(255,255,255,.08);margin-top:4px;}
+  #steerDot{position:absolute;top:-2px;left:50%;width:4px;height:9px;background:var(--ink);
+    transform:translateX(-50%);transition:left .05s;}
+  .gInd{padding:5px 10px;display:flex;align-items:center;gap:6px;}
+  .gInd .sl{font-size:9px;color:var(--mut);letter-spacing:.12em;font-weight:800;}
+  #gBar{position:relative;flex:1;height:5px;background:rgba(255,255,255,.08);}
+  #gDot{position:absolute;top:-2px;left:50%;width:4px;height:9px;background:var(--yellow);
+    transform:translateX(-50%);transition:left .05s;}
+  #gVal{font-size:10px;color:var(--ink);min-width:30px;text-align:right;}
 
-  /* 警告动画 */
-  @keyframes warnPulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
-  .warn{animation:warnPulse 0.6s infinite;}
-  .warn-danger{color:var(--danger)!important;}
-  .warn-danger .fill{background:var(--danger)!important;}
-  .warn-warn{color:var(--soft)!important;}
-  .warn-warn .fill{background:var(--soft)!important;}
+  /* 警告状态 (数值过低) */
+  @keyframes warnPulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+  .warn{animation:warnPulse .7s infinite;}
+  .warn-danger .sl,.warn-danger .sv{color:var(--red)!important;}
+  .warn-danger .fill{background:var(--red)!important;}
+  .warn-warn .sl,.warn-warn .sv{color:var(--yellow)!important;}
+  .warn-warn .fill{background:var(--yellow)!important;}
 
-  /* 速度警告 (速度表变红) */
-  #speedo.speedWarn{color:var(--danger);text-shadow:0 0 20px rgba(255,51,85,.6);animation:warnPulse 0.5s infinite;}
+  #speedo.speedWarn{color:var(--red);animation:warnPulse .5s infinite;}
 
   /* 位置变化通知 */
-  #posNotify{position:absolute;top:50%;right:12px;transform:translateY(-50%);
-    padding:8px 16px;font-size:14px;font-weight:900;letter-spacing:.1em;
-    opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:11;}
+  #posNotify{position:absolute;top:50%;right:14px;transform:translateY(-50%);
+    padding:7px 16px;font-size:13px;font-weight:800;letter-spacing:.08em;
+    opacity:0;transition:opacity .3s;pointer-events:none;z-index:11;}
   #posNotify.show{opacity:1;}
-  #posNotify.overtake{color:var(--green);border-color:var(--green);}
-  #posNotify.lost{color:var(--danger);border-color:var(--danger);}
+  #posNotify.overtake{color:var(--green);border-left:3px solid var(--green);}
+  #posNotify.lost{color:var(--red);border-left:3px solid var(--red);}
 
-  /* 车间距显示 */
-  #gapDisplay{position:absolute;top:50%;right:12px;transform:translateY(30px);
-    padding:6px 10px;font-size:10px;display:flex;flex-direction:column;gap:3px;width:100px;}
-  #gapDisplay .gapLabel{color:var(--muted);font-size:8px;letter-spacing:.1em;margin-right:6px;}
+  /* 车间距 */
+  #gapDisplay{position:absolute;top:50%;right:14px;transform:translateY(34px);
+    padding:7px 11px;font-size:10px;display:flex;flex-direction:column;gap:3px;width:108px;}
+  #gapDisplay .gapLabel{color:var(--mut);font-size:8px;letter-spacing:.12em;margin-right:6px;font-weight:800;}
   #gapAheadVal,#gapBehindVal{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;}
   #gapAheadVal.fast{color:var(--green);}
-  #gapAheadVal.slow{color:var(--danger);}
-  #gapBehindVal.fast{color:var(--danger);}
+  #gapAheadVal.slow{color:var(--red);}
+  #gapBehindVal.fast{color:var(--red);}
   #gapBehindVal.slow{color:var(--green);}
 
-  /* 速度模糊效果 */
+  /* 速度模糊 */
   #speedBlur{position:absolute;inset:0;pointer-events:none;z-index:5;
-    background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.1) 100%);
-    opacity:0;transition:opacity 0.3s;}
+    background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,.35) 100%);
+    opacity:0;transition:opacity .3s;}
 
-  /* ---- 中央消息 ---- */
-  #msg{position:absolute;top:36%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:12;display:none;}
-  #msg .m1{font-size:56px;font-weight:900;letter-spacing:.04em;
-    text-shadow:0 0 30px rgba(0,229,255,.5);}
-  #msg .m2{font-size:15px;color:var(--muted);letter-spacing:.2em;margin-top:4px;}
+  /* ---- 中央消息 (转播横幅) ---- */
+  #msg{position:absolute;top:34%;left:50%;transform:translate(-50%,-50%);text-align:left;z-index:12;display:none;
+    background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--red);
+    padding:10px 30px 10px 18px;clip-path:var(--cut);}
+  #msg .m1{font-size:34px;font-weight:800;letter-spacing:.03em;}
+  #msg .m2{font-size:12px;color:var(--mut);letter-spacing:.1em;margin-top:2px;}
 
-  /* ---- 起步灯 ---- */
-  #lights{position:absolute;top:28%;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:13;}
-  .light{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.06);
-    border:2px solid rgba(255,255,255,.1);}
-  .light.on{background:var(--danger);box-shadow:0 0 18px var(--danger);}
-  .light.out{background:rgba(40,40,40,.4);border-color:rgba(80,80,80,.3);}
+  /* ---- 起步灯 (灯架) ---- */
+  #lights{position:absolute;top:24%;left:50%;transform:translateX(-50%);display:flex;gap:14px;z-index:13;
+    background:rgba(10,10,14,.85);border:1px solid var(--line);padding:12px 18px;}
+  .light{width:30px;height:30px;border-radius:50%;background:#2a2a32;
+    border:2px solid rgba(255,255,255,.08);}
+  .light.on{background:var(--red);border-color:#ff4d4d;box-shadow:0 0 14px rgba(225,6,0,.8);}
+  .light.out{background:#1a1a20;border-color:#1a1a20;}
 
   /* ---- 覆盖屏幕 ---- */
   .screen{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;
     align-items:center;justify-content:center;text-align:center;padding:30px;
-    background:radial-gradient(ellipse at 50% 40%,rgba(10,20,40,.92),rgba(5,8,15,.97));}
+    background:var(--texture),linear-gradient(165deg,rgba(24,24,34,.96),rgba(13,13,19,.98));}
   .screen.hidden{display:none;}
-  .title{font-size:50px;font-weight:900;letter-spacing:.06em;
-    background:linear-gradient(90deg,var(--accent),var(--accent2));
-    -webkit-background-clip:text;background-clip:text;color:transparent;
-    text-shadow:0 0 36px rgba(0,229,255,.35);}
-  .sub{color:var(--muted);font-size:13px;letter-spacing:.4em;text-transform:uppercase;margin:6px 0 26px;}
-  .btn{margin-top:24px;padding:14px 50px;border:none;border-radius:30px;cursor:pointer;
-    background:linear-gradient(90deg,var(--accent),var(--accent2));color:#05080f;
-    font-weight:900;font-size:16px;letter-spacing:.12em;text-transform:uppercase;
-    box-shadow:0 0 30px rgba(0,229,255,.3);transition:transform .12s;}
-  .btn:active{transform:scale(.95);}
+  .title{font-size:46px;font-weight:800;letter-spacing:.05em;color:var(--ink);}
+  .title::after{content:'';display:block;width:64px;height:4px;background:var(--red);margin:10px auto 0;}
+  .sub{color:var(--mut);font-size:12px;letter-spacing:.35em;text-transform:uppercase;margin:14px 0 24px;}
+  .btn{margin-top:24px;padding:13px 48px;border:none;cursor:pointer;
+    background:var(--red);color:#fff;font-weight:800;font-size:15px;letter-spacing:.1em;
+    clip-path:var(--cut);transition:background .15s;font-family:inherit;}
+  .btn:hover{background:var(--red-dk);}
+  .btn:active{transform:scale(.97);}
+  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.25);color:var(--ink);}
+  .btn.ghost:hover{background:rgba(255,255,255,.08);}
+  .btn.small{padding:10px 24px;font-size:13px;margin-top:0;}
 
   /* 难度选择 */
-  .difficulty-select{margin:1.5rem 0;text-align:center;}
-  .diff-label{font-size:11px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;margin-bottom:10px;}
-  .diff-options{display:flex;gap:10px;justify-content:center;}
+  .difficulty-select{margin:1.2rem 0;text-align:center;}
+  .diff-label{font-size:10px;color:var(--mut);letter-spacing:.2em;text-transform:uppercase;margin-bottom:10px;font-weight:700;}
+  .diff-options{display:flex;gap:8px;justify-content:center;}
   .diff-btn{
-    padding:10px 18px;border:2px solid var(--rule);border-radius:8px;
-    background:var(--glass);color:var(--ink);cursor:pointer;
-    font-size:13px;font-weight:700;transition:all .2s;min-width:80px;
+    padding:9px 18px;border:1px solid var(--line);
+    background:var(--panel);color:var(--mut);cursor:pointer;
+    font-size:13px;font-weight:700;transition:all .15s;min-width:76px;font-family:inherit;
+    clip-path:var(--cut);
   }
-  .diff-btn span{font-size:9px;color:var(--muted);font-weight:400;display:block;margin-top:3px;}
-  .diff-btn:hover{border-color:var(--accent);background:rgba(0,212,255,.08);}
-  .diff-btn.selected{border-color:var(--accent);background:rgba(0,212,255,.15);color:var(--accent);}
-  .diff-btn.selected span{color:var(--accent);}
+  .diff-btn span{font-size:9px;color:var(--mut);font-weight:400;display:block;margin-top:3px;}
+  .diff-btn:hover{border-color:rgba(255,255,255,.4);color:var(--ink);}
+  .diff-btn.selected{border-color:var(--red);background:rgba(225,6,0,.14);color:var(--ink);}
+  .diff-btn.selected span{color:var(--mut);}
 
-  .tips{margin-top:24px;color:var(--muted);font-size:12px;line-height:2;max-width:420px;}
-  .tips kbd{display:inline-block;min-width:24px;padding:2px 7px;margin:0 2px;
-    background:var(--rule);border:1px solid #2a3a5a;border-radius:5px;color:var(--accent);
+  .tips{margin-top:22px;color:var(--mut);font-size:12px;line-height:2;max-width:440px;}
+  .tips kbd{display:inline-block;min-width:22px;padding:2px 7px;margin:0 2px;
+    background:#26262f;border:1px solid #3a3a46;border-bottom-width:2px;color:var(--ink);
     font-size:11px;font-weight:700;}
-  .feat{display:flex;flex-wrap:wrap;gap:6px 10px;justify-content:center;margin-top:18px;max-width:460px;}
-  .feat span{font-size:10px;color:var(--accent);border:1px solid var(--rule);
-    padding:3px 8px;border-radius:10px;letter-spacing:.05em;}
-  #finalScore{font-size:60px;font-weight:900;color:var(--soft);}
-  .resGrid{display:flex;gap:28px;margin-top:18px;}
-  .resItem .rl{font-size:10px;color:var(--muted);letter-spacing:.2em;}
-  .resItem .rv{font-size:24px;font-weight:900;color:var(--accent);}
-  .pauseT{font-size:34px;font-weight:900;color:var(--accent);letter-spacing:.1em;}
+  .feat{display:flex;flex-wrap:wrap;gap:6px 8px;justify-content:center;margin-top:16px;max-width:480px;}
+  .feat span{font-size:10px;color:var(--mut);border:1px solid var(--line);
+    padding:3px 9px;letter-spacing:.05em;}
+  #finalScore{font-size:64px;font-weight:800;color:var(--ink);}
+  .resGrid{display:flex;gap:30px;margin-top:16px;}
+  .resItem .rl{font-size:10px;color:var(--mut);letter-spacing:.2em;font-weight:700;}
+  .resItem .rv{font-size:24px;font-weight:800;color:var(--ink);}
+  .pauseT{font-size:34px;font-weight:800;color:var(--ink);letter-spacing:.08em;}
+  /* 联机名次奖牌 */
+  #mpResults .p1{color:var(--yellow);}
+  #mpResults .p2{color:#c0c0c8;}
+  #mpResults .p3{color:var(--bronze);}
 
   /* ---- 触摸控制 ---- */
   #touch{position:absolute;inset:0;z-index:15;display:none;pointer-events:none;}
-  .tbtn{position:absolute;width:72px;height:72px;border-radius:50%;
-    background:rgba(0,229,255,.08);border:2px solid var(--accent);color:var(--accent);
-    font-size:24px;font-weight:900;display:flex;align-items:center;justify-content:center;
-    pointer-events:auto;backdrop-filter:blur(3px);}
-  .tbtn:active{background:rgba(0,229,255,.3);}
+  .tbtn{position:absolute;width:70px;height:70px;border-radius:50%;
+    background:rgba(21,21,30,.6);border:2px solid rgba(255,255,255,.35);color:var(--ink);
+    font-size:22px;font-weight:800;display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;}
+  .tbtn:active{background:rgba(225,6,0,.4);border-color:var(--red);}
   #tAcc{bottom:110px;right:16px;}
   #tBrk{bottom:30px;right:16px;}
   #tL{bottom:30px;left:16px;}
@@ -242,137 +259,126 @@
   #pitGamePanel{
     position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);
     z-index:15;display:none;flex-direction:column;align-items:center;
-    padding:24px 36px;border-radius:12px;
-    background:rgba(5,12,22,.92);border:2px solid var(--accent);
-    backdrop-filter:blur(10px);pointer-events:none;
-    box-shadow:0 0 40px rgba(0,229,255,.2);
+    padding:22px 34px;
+    background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--red);
+    pointer-events:none;clip-path:var(--cut);
   }
-  #pitGamePanel.pit-fail{border-color:var(--danger);box-shadow:0 0 40px rgba(255,51,85,.3);}
-  #pitGameTitle{font-size:12px;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;font-weight:800;}
-  #pitGameLetters{display:flex;gap:8px;margin-bottom:16px;}
+  #pitGamePanel.pit-fail{border-left-color:var(--red);background:#2a1215;}
+  #pitGameTitle{font-size:12px;color:var(--ink);letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;font-weight:800;}
+  #pitGameLetters{display:flex;gap:8px;margin-bottom:14px;}
   .pit-letter{
     width:40px;height:48px;display:flex;align-items:center;justify-content:center;
-    font-size:24px;font-weight:900;border-radius:6px;
-    border:2px solid var(--rule);color:var(--muted);
-    background:rgba(255,255,255,.03);transition:all .15s;
+    font-size:24px;font-weight:800;
+    border:1px solid var(--line);color:var(--mut);
+    background:rgba(255,255,255,.04);transition:all .15s;
   }
-  .pit-letter.done{border-color:var(--green);color:var(--green);background:rgba(34,255,136,.08);}
-  .pit-letter.current{border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.1);
-    animation:pitPulse .6s infinite;box-shadow:0 0 12px rgba(0,229,255,.3);}
-  @keyframes pitPulse{50%{opacity:.5;transform:scale(1.05);}}
-  #pitGameTimerWrap{width:100%;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}
-  #pitGameTimer{height:100%;width:100%;border-radius:3px;transition:width .1s linear, background .3s;}
-  #pitGameHint{font-size:10px;color:var(--muted);margin-top:8px;letter-spacing:.1em;}
+  .pit-letter.done{border-color:var(--green);color:var(--green);}
+  .pit-letter.current{border-color:var(--ink);color:var(--ink);
+    animation:pitPulse .6s infinite;}
+  @keyframes pitPulse{50%{opacity:.5;}}
+  #pitGameTimerWrap{width:100%;height:5px;background:rgba(255,255,255,.08);overflow:hidden;}
+  #pitGameTimer{height:100%;width:100%;transition:width .1s linear, background .3s;}
+  #pitGameHint{font-size:10px;color:var(--mut);margin-top:8px;letter-spacing:.1em;}
 
-  /* ---- 车辆选择系统 ---- */
+  /* ---- 车库 (车辆选择) ---- */
   #garageScreen{
     position:absolute;inset:0;z-index:25;display:flex;flex-direction:column;
     align-items:center;justify-content:center;padding:20px;
-    background:radial-gradient(ellipse at 50% 40%,rgba(10,20,40,.95),rgba(5,8,15,.98));
+    background:var(--texture),linear-gradient(165deg,rgba(24,24,34,.97),rgba(13,13,19,.99));
   }
   #garageScreen.hidden{display:none;}
-  .garage-title{font-size:36px;font-weight:900;letter-spacing:.06em;
-    background:linear-gradient(90deg,var(--accent),var(--accent2));
-    -webkit-background-clip:text;background-clip:text;color:transparent;
-    text-shadow:0 0 36px rgba(0,229,255,.35);margin-bottom:4px;}
-  .garage-sub{color:var(--muted);font-size:12px;letter-spacing:.3em;text-transform:uppercase;margin-bottom:20px;}
-  .garage-body{display:flex;gap:30px;max-width:900px;width:100%;}
-  /* 车辆列表 */
+  .garage-title{font-size:34px;font-weight:800;letter-spacing:.05em;color:var(--ink);}
+  .garage-title::after{content:'';display:block;width:48px;height:3px;background:var(--red);margin:8px auto 0;}
+  .garage-sub{color:var(--mut);font-size:11px;letter-spacing:.3em;text-transform:uppercase;margin:12px 0 20px;}
+  .garage-body{display:flex;gap:24px;max-width:900px;width:100%;}
   .car-list{flex:1;display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;padding-right:4px;}
   .car-list::-webkit-scrollbar{width:4px;}
   .car-list::-webkit-scrollbar-track{background:rgba(255,255,255,.05);}
-  .car-list::-webkit-scrollbar-thumb{background:var(--accent);border-radius:2px;}
+  .car-list::-webkit-scrollbar-thumb{background:var(--red);}
   .car-item{
-    display:flex;align-items:center;gap:10px;padding:8px 12px;
-    border:2px solid var(--rule);border-radius:8px;cursor:pointer;
-    background:var(--glass);transition:all .15s;
+    display:flex;align-items:center;gap:10px;padding:9px 12px;
+    border:1px solid var(--line);cursor:pointer;
+    background:var(--panel);transition:all .15s;clip-path:var(--cut);
   }
-  .car-item:hover{border-color:var(--accent);background:rgba(0,229,255,.08);}
-  .car-item.selected{border-color:var(--accent);background:rgba(0,229,255,.12);}
-  .car-color-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor;}
-  .car-info{flex:1;}
+  .car-item:hover{border-color:rgba(255,255,255,.4);}
+  .car-item.selected{border-color:var(--red);background:rgba(225,6,0,.1);}
+  .car-color-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.25);}
+  .car-info{flex:1;text-align:left;}
   .car-name{font-size:13px;font-weight:700;color:var(--ink);}
-  .car-driver{font-size:10px;color:var(--muted);margin-top:1px;}
-  .car-num{font-size:16px;font-weight:900;color:var(--accent);min-width:28px;text-align:right;}
-  /* 右侧: 配置面板 */
-  .car-config{width:280px;display:flex;flex-direction:column;gap:14px;}
+  .car-driver{font-size:10px;color:var(--mut);margin-top:1px;}
+  .car-num{font-size:15px;font-weight:800;color:var(--mut);min-width:28px;text-align:right;}
+  .car-config{width:280px;display:flex;flex-direction:column;gap:12px;}
   .config-section{
-    background:var(--glass);border:1px solid var(--rule);border-radius:8px;padding:12px;
+    background:var(--panel);border:1px solid var(--line);padding:12px;clip-path:var(--cut);
   }
-  .config-label{font-size:10px;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;margin-bottom:8px;}
+  .config-label{font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px;font-weight:700;}
   .tire-options,.paint-options{display:flex;gap:8px;}
   .tire-btn,.paint-btn{
-    flex:1;padding:8px;border:2px solid var(--rule);border-radius:6px;
-    background:var(--glass);color:var(--ink);cursor:pointer;
-    font-size:11px;font-weight:700;text-align:center;transition:all .15s;
+    flex:1;padding:8px;border:1px solid var(--line);
+    background:transparent;color:var(--mut);cursor:pointer;
+    font-size:12px;font-weight:700;text-align:center;transition:all .15s;font-family:inherit;
   }
-  .tire-btn:hover,.paint-btn:hover{border-color:var(--accent);}
-  .tire-btn.selected,.paint-btn.selected{border-color:var(--accent);background:rgba(0,229,255,.1);}
-  .tire-btn .tire-desc,.paint-btn .paint-desc{font-size:8px;color:var(--muted);font-weight:400;display:block;margin-top:2px;}
-  .tire-btn.selected .tire-desc,.paint-btn.selected .paint-desc{color:var(--accent);}
-  /* 预览 */
+  .tire-btn:hover,.paint-btn:hover{border-color:rgba(255,255,255,.4);color:var(--ink);}
+  .tire-btn.selected,.paint-btn.selected{border-color:var(--red);background:rgba(225,6,0,.12);color:var(--ink);}
+  .tire-btn .tire-desc,.paint-btn .paint-desc{font-size:9px;color:var(--mut);font-weight:400;display:block;margin-top:2px;}
   .preview-box{
-    background:var(--glass);border:1px solid var(--rule);border-radius:8px;
-    padding:10px;text-align:center;
+    background:var(--panel);border:1px solid var(--line);
+    padding:10px;text-align:center;clip-path:var(--cut);
   }
   .preview-color{
-    width:60px;height:30px;border-radius:6px;margin:4px auto;
-    border:2px solid rgba(255,255,255,.2);
+    width:64px;height:28px;margin:4px auto;
+    border:1px solid rgba(255,255,255,.25);
   }
-  .preview-info{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;}
-  .preview-info b{color:var(--accent);}
-  /* 颜色选择器 */
+  .preview-info{font-size:11px;color:var(--mut);margin-top:6px;line-height:1.7;}
+  .preview-info b{color:var(--ink);}
   .color-palette{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
   .color-swatch{
     width:24px;height:24px;border-radius:50%;cursor:pointer;
-    border:2px solid transparent;transition:all .15s;
+    border:2px solid transparent;transition:transform .15s;
   }
   .color-swatch:hover{transform:scale(1.15);}
-  .color-swatch.selected{border-color:var(--accent);box-shadow:0 0 8px var(--accent);}
+  .color-swatch.selected{border-color:#fff;}
 
   /* ---- 主菜单模式按钮 ---- */
-  .menu-btns{display:flex;flex-direction:column;gap:12px;margin-top:24px;align-items:center;}
+  .menu-btns{display:flex;flex-direction:column;gap:12px;margin-top:20px;align-items:center;}
   .menu-btns .btn{margin-top:0;width:280px;}
-  .btn.ghost{background:transparent;border:2px solid var(--accent);color:var(--accent);box-shadow:none;}
-  .btn.ghost:hover{background:rgba(0,229,255,.12);}
-  .btn.small{padding:10px 24px;font-size:13px;}
 
   /* ---- 选赛道 ---- */
-  .track-cards{display:flex;gap:16px;margin:18px 0 6px;}
-  .track-card{width:230px;padding:16px;border:2px solid var(--rule);border-radius:10px;
-    background:var(--glass);cursor:pointer;text-align:left;transition:all .15s;}
-  .track-card:hover{border-color:var(--accent);}
-  .track-card.selected{border-color:var(--accent);background:rgba(0,229,255,.1);
-    box-shadow:0 0 20px rgba(0,229,255,.15);}
-  .track-card.locked{opacity:.4;cursor:not-allowed;}
-  .track-card .tname{font-size:18px;font-weight:900;color:var(--accent);}
-  .track-card .tsub{font-size:11px;color:var(--ink);margin-top:2px;}
-  .track-card .tdesc{font-size:10px;color:var(--muted);margin-top:6px;letter-spacing:.05em;}
-  .laps-row{display:flex;gap:10px;justify-content:center;margin-top:6px;}
+  .track-cards{display:flex;gap:14px;margin:18px 0 6px;}
+  .track-card{width:230px;padding:16px;border:1px solid var(--line);
+    background:var(--panel);cursor:pointer;text-align:left;transition:all .15s;clip-path:var(--cut);}
+  .track-card:hover{border-color:rgba(255,255,255,.4);}
+  .track-card.selected{border-color:var(--red);background:rgba(225,6,0,.1);}
+  .track-card.locked{opacity:.35;cursor:not-allowed;}
+  .track-card .tname{font-size:17px;font-weight:800;color:var(--ink);}
+  .track-card .tsub{font-size:11px;color:var(--mut);margin-top:2px;}
+  .track-card .tdesc{font-size:10px;color:var(--mut);margin-top:8px;letter-spacing:.05em;
+    border-top:1px solid var(--line);padding-top:8px;}
+  .laps-row{display:flex;gap:8px;justify-content:center;margin-top:6px;}
 
   /* ---- 大厅 ---- */
-  .lobby-cols{display:flex;gap:18px;max-width:920px;width:100%;text-align:left;}
+  .lobby-cols{display:flex;gap:16px;max-width:920px;width:100%;text-align:left;}
   .lobby-left{flex:1;min-width:0;}
   .lobby-right{width:340px;display:flex;flex-direction:column;gap:10px;flex-shrink:0;}
-  .player-row{display:flex;align-items:center;gap:10px;padding:8px 12px;
-    border:1px solid var(--rule);border-radius:8px;background:var(--glass);margin-bottom:6px;}
+  .player-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
+    border:1px solid var(--line);background:var(--panel);margin-bottom:6px;clip-path:var(--cut);}
   .player-row .pname{flex:1;font-weight:700;font-size:14px;}
-  .player-row .pcar{color:var(--muted);font-size:11px;}
-  .player-row .pready{font-size:10px;font-weight:900;letter-spacing:.1em;color:var(--muted);}
+  .player-row .pcar{color:var(--mut);font-size:11px;}
+  .player-row .pready{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--mut);}
   .player-row .pready.ready{color:var(--green);}
-  .player-row .phost{font-size:9px;color:var(--soft);border:1px solid var(--soft);
-    border-radius:8px;padding:1px 6px;letter-spacing:.1em;}
-  .code-box{width:100%;height:52px;background:rgba(255,255,255,.05);border:1px solid var(--rule);
-    border-radius:6px;color:var(--ink);font:10px monospace;padding:6px;resize:none;margin-top:4px;}
-  .invite-slot{border:1px solid var(--rule);border-radius:8px;padding:10px;margin-top:8px;}
-  .invite-slot .slot-title{font-size:10px;color:var(--accent);letter-spacing:.15em;margin-bottom:4px;}
-  .lobby-status{font-size:11px;color:var(--accent);margin-top:10px;min-height:14px;}
-  .section-title{font-size:10px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;margin-bottom:6px;}
-  .lobby-btns{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
-  .name-input{background:rgba(255,255,255,.06);border:1px solid var(--rule);border-radius:6px;
+  .player-row .phost{font-size:9px;color:#15151e;background:var(--yellow);
+    padding:2px 7px;letter-spacing:.1em;font-weight:800;}
+  .code-box{width:100%;height:52px;background:rgba(255,255,255,.05);border:1px solid var(--line);
+    color:var(--ink);font:10px monospace;padding:6px;resize:none;margin-top:4px;}
+  .invite-slot{border:1px solid var(--line);background:var(--panel);padding:10px;margin-top:8px;clip-path:var(--cut);}
+  .invite-slot .slot-title{font-size:10px;color:var(--mut);letter-spacing:.12em;margin-bottom:4px;font-weight:700;}
+  .lobby-status{font-size:11px;color:var(--green);margin-top:10px;min-height:14px;}
+  .section-title{font-size:10px;color:var(--mut);letter-spacing:.2em;text-transform:uppercase;margin-bottom:6px;font-weight:700;}
+  .lobby-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .name-input{background:rgba(255,255,255,.06);border:1px solid var(--line);
     color:var(--ink);padding:9px 12px;font-size:13px;font-weight:700;width:200px;
     font-family:inherit;letter-spacing:.05em;}
-  .name-input:focus{outline:none;border-color:var(--accent);}
+  .name-input:focus{outline:none;border-color:var(--red);}
 </style>
 </head>
 <body>
@@ -434,7 +440,7 @@
 
     <!-- 右下: 状态 + 控制 -->
     <div id="br">
-      <div class="gp statRow" id="tireRow"><span class="sl">TIRE</span><span id="tireTypeBadge" style="font-size:9px;font-weight:900;color:#ff4444;margin-right:4px;">S</span><div class="bar"><div class="fill" id="tireFill" style="width:100%"></div></div><span class="sv" id="tireVal">100%</span></div>
+      <div class="gp statRow" id="tireRow"><span class="sl">TIRE</span><span id="tireTypeBadge">S</span><div class="bar"><div class="fill" id="tireFill" style="width:100%"></div></div><span class="sv" id="tireVal">100%</span></div>
       <div class="gp statRow" id="tireWearRow"><span class="sl">WEAR</span><span class="sv" id="tireWearVal" style="width:auto;min-width:50px;">0/3 圈</span></div>
       <div class="gp statRow"><span class="sl">ERS</span><div class="bar"><div class="fill" id="ersFill" style="width:100%"></div></div><span class="sv" id="ersVal">100%</span></div>
       <div class="gp statRow" id="fuelRow"><span class="sl">FUEL</span><div class="bar"><div class="fill" id="fuelFill" style="width:100%"></div></div><span class="sv" id="fuelVal">100%</span></div>
@@ -615,8 +621,8 @@
           <div id="hostSettings" style="display:none;">
             <div class="config-section">
               <div class="config-label">赛道</div>
-              <div style="font-size:13px;font-weight:700;color:var(--accent);">MARINA BAY · 滨海湾</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">更多赛道敬请期待</div>
+              <div style="font-size:13px;font-weight:700;color:var(--ink);">MARINA BAY · 滨海湾</div>
+              <div style="font-size:10px;color:var(--mut);margin-top:2px;">更多赛道敬请期待</div>
             </div>
             <div class="config-section">
               <div class="config-label">圈数</div>
@@ -659,7 +665,7 @@
 
   <!-- Game over -->
   <div class="screen hidden" id="overScreen">
-    <div class="title" style="font-size:38px;color:var(--soft);background:none;-webkit-text-fill-color:var(--soft);">RACE FINISHED</div>
+    <div class="title" style="font-size:38px;">RACE FINISHED</div>
     <div class="sub" id="overSub">最终成绩</div>
     <div id="finalScore">P1</div>
     <div class="resGrid">

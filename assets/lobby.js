@@ -537,10 +537,10 @@ function showResults(order){
   if(!el) return;
   el.innerHTML = '<div class="section-title" style="margin-top:10px;">最终名次</div>' +
     order.map(o=>
-      `<div style="display:flex;gap:14px;justify-content:center;font-size:13px;line-height:1.9;">`+
-      `<span style="color:var(--soft);font-weight:900;width:34px;text-align:right;">P${o.pos}</span>`+
+      `<div style="display:flex;gap:14px;justify-content:center;font-size:13px;line-height:1.9;" class="p${o.pos}">`+
+      `<span style="font-weight:800;width:34px;text-align:right;" class="pos-num">P${o.pos}</span>`+
       `<span style="min-width:90px;text-align:left;">${o.name}</span>`+
-      `<span style="color:var(--muted);">${o.time!=null ? fmtTime(o.time) : 'DNF'}</span></div>`
+      `<span style="color:var(--mut);">${o.time!=null ? fmtTime(o.time) : 'DNF'}</span></div>`
     ).join('');
 }
 function fmtTime(t){

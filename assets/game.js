@@ -2958,8 +2958,10 @@ function updateHUD(dt){
   // 轮胎类型标记 + 磨损圈数
   const typeBadge = $('tireTypeBadge');
   if(typeBadge){
+    // 真实配方色: S=红, H=白底黑字
     typeBadge.textContent = c.tireType==='soft'?'S':'H';
-    typeBadge.style.color = c.tireType==='soft'?'#ff4444':'#fbbf24';
+    if(c.tireType==='soft'){ typeBadge.style.background='#e10600'; typeBadge.style.color='#fff'; }
+    else { typeBadge.style.background='#f5f5f5'; typeBadge.style.color='#15151e'; }
   }
   const wearVal = $('tireWearVal');
   if(wearVal){
