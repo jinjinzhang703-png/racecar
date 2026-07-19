@@ -74,7 +74,7 @@ try{
     // --- A: 车对车正面对撞 (等质量对开 25m/s) ---
     {
       const a = body(-300, 340, Math.PI/2, 25, 0);
-      const b = body(-296.5, 340, -Math.PI/2, -25, 0);
+      const b = body(-295.4, 340, -Math.PI/2, -25, 0);
       const contact = P.obbContact(a, b);
       const before = a.velocity.x + b.velocity.x; // 动量(m相同) ∝ 速度之和
       const res = contact && P.carCarResolve(a, b, contact);
@@ -83,14 +83,14 @@ try{
         vn: res ? res.vn : null,
         avx: a.velocity.x, bvx: b.velocity.x,
         pBefore: before, pAfter: a.velocity.x + b.velocity.x,
-        separated: a.pos.x < -300 && b.pos.x > -296.5,
+        separated: a.pos.x < -300 && b.pos.x > -295.4,
       };
     }
 
     // --- B: 车对车偏心碰撞 → 打转 ---
     {
       const a = body(-300, 340, Math.PI/2, 25, 0);
-      const b = body(-296.5, 340.8, -Math.PI/2, -25, 0); // 横向偏移 0.8m
+      const b = body(-295.05, 340.7, -Math.PI/2, -25, 0); // 横向偏移 0.8m
       const contact = P.obbContact(a, b);
       const res = contact && P.carCarResolve(a, b, contact);
       out.offset = { contact: !!contact, wa: a.angularVel, wb: b.angularVel };
@@ -99,7 +99,7 @@ try{
     // --- C: 已在分离 → 不重复加冲量 ---
     {
       const a = body(-300, 340, Math.PI/2, -5, 0);
-      const b = body(-296.5, 340, -Math.PI/2, 5, 0);
+      const b = body(-295.4, 340, -Math.PI/2, 5, 0);
       const contact = P.obbContact(a, b);
       const res = contact && P.carCarResolve(a, b, contact);
       out.separating = { res: res === null, avx: a.velocity.x, bvx: b.velocity.x };

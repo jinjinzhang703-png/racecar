@@ -1272,6 +1272,9 @@ function buildF1Car(color, team, isPlayer){
   g.userData.sidepodMat = sidepodMat; // 侧箱材质 (带车队纹理)
   g.userData.wheelRings = allWheels; // 全部4个车轮 Mesh (共享 tire 材质)
 
+  // 真实 F1 比例: 车长 ~5.85m, 宽 ~1.86m (与 CAR_CORNERS/Physics2D 碰撞盒一致)
+  g.scale.setScalar(1.5);
+
   return g;
 }
 
@@ -1574,14 +1577,15 @@ const _tmp=new THREE.Vector3();
 //  围栏硬碰撞 (边界框 + 冲量物理引擎 + 子步防穿模)
 // ============================================================
 // 赛车边界框角点 (局部坐标, x=横向, z=纵向, +z=车头方向)
-// 前翼宽 1.2m → x=±0.6; 车头 z=2.2; 车尾 z=-1.6; 侧箱 x=±0.55
+// 与放大 1.5x 后的车模一致 (真实 F1 比例: 长 ~5.9m, 宽 ~1.86m)
+// 前翼宽 1.86m → x=±0.93; 车头 z=3.38; 车尾 z=-2.48; 侧箱 x=±0.87
 const CAR_CORNERS = [
-  {x:-0.62, z:2.25},  // 前左 (前翼端板)
-  {x: 0.62, z:2.25},  // 前右
-  {x:-0.58, z:-1.65}, // 后左 (后翼端板)
-  {x: 0.58, z:-1.65}, // 后右
-  {x:-0.62, z:0.1},   // 中左 (侧箱)
-  {x: 0.62, z:0.1},   // 中右
+  {x:-0.93, z:3.38},  // 前左 (前翼端板)
+  {x: 0.93, z:3.38},  // 前右
+  {x:-0.87, z:-2.48}, // 后左 (后翼端板)
+  {x: 0.87, z:-2.48}, // 后右
+  {x:-0.93, z:0.15},  // 中左 (侧箱)
+  {x: 0.93, z:0.15},  // 中右
 ];
 
 // 计算车辆角点的世界坐标 (返回 Vector3, 带 _lastSampleIdx 优化提示)
@@ -1710,6 +1714,8 @@ function barrierCollision(c){
     // 刮擦/撞击消耗轮胎: 烈度越大损耗越多
     const tireHit = impact > 20 ? 6 : impact > 8 ? 3 : impact > 2.5 ? 1 : 0;
     c.tire = Math.max(0, c.tire - tireHit);
+    // 悬挂冲击: 车身向下"砸"一下再回弹 (重力感)
+    if(c._sus && impact > 4) c._sus.yV = Math.min(c._sus.yV, -impact * 0.02);
   }
 
   c._lastHit = hit;
@@ -1928,10 +1934,11 @@ function updatePlayer(dt){
   }
 
   // 齿轮 / RPM (基于真实换挡曲线)
-  const gearRange=c.maxSpeed/8;
+  const gearRange=Math.max(1e-6, c.maxSpeed/8); // 除零防护
   c.gear=THREE.MathUtils.clamp(1+Math.floor(c.speed/gearRange),1,8);
-  const frac=THREE.MathUtils.clamp((c.speed-(c.gear-1)*gearRange)/gearRange,0,1);
-  c.rpm = 3000 + frac*(14500-3000);
+  let gearFrac=THREE.MathUtils.clamp((c.speed-(c.gear-1)*gearRange)/gearRange,0,1);
+  if(!isFinite(gearFrac)) gearFrac=0; // NaN 防护
+  c.rpm = 3000 + gearFrac*(14500-3000);
 
   applyMesh(c);
   updateProgress(c, dt);
@@ -2333,16 +2340,46 @@ function updateAI(c, dt){
 }
 
 function applyMesh(c){
-  c.mesh.position.copy(c.pos); c.mesh.position.y=0;
+  c.mesh.position.copy(c.pos);
   c.mesh.rotation.y=c.heading;
-  // 撞墙翻滚动画 (Z轴旋转)
+
+  // === 悬挂/重量转移 (纯视觉, 弹簧-阻尼模型; 真实F1悬挂硬, 幅度克制) ===
+  const sus=c._sus||(c._sus={pitch:0,pitchV:0,roll:0,rollV:0,y:0,yV:0,prevSpeed:c.speed||0,prevH:c.heading,phase:Math.random()*7});
+  const dtS=1/60;
+  // 纵向加速度 (速度差分): 制动→点头(前俯), 加速→抬头(后蹲)
+  const dV=(c.speed-sus.prevSpeed)/dtS;
+  sus.prevSpeed=c.speed;
+  // 横向加速度 ≈ yaw率 × 速度: 过弯→外倾
+  let dH=c.heading-sus.prevH;
+  while(dH>Math.PI)dH-=2*Math.PI;
+  while(dH<-Math.PI)dH+=2*Math.PI;
+  sus.prevH=c.heading;
+  const latA=(dH/dtS)*THREE.MathUtils.clamp(c.speed,-40,40);
+  const tgtPitch=THREE.MathUtils.clamp(-dV*0.0016,-0.035,0.035);
+  const tgtRoll=THREE.MathUtils.clamp(latA*0.0012,-0.03,0.03);
+  // 弹簧-阻尼趋近目标姿态
+  sus.pitchV += ((tgtPitch-sus.pitch)*60 - sus.pitchV*10)*dtS;
+  sus.pitch += sus.pitchV*dtS;
+  sus.rollV += ((tgtRoll-sus.roll)*60 - sus.rollV*10)*dtS;
+  sus.roll += sus.rollV*dtS;
+  // 垂直: 路面噪声(随速度) + 碰撞冲击回弹 (重力感)
+  const spd=Math.abs(c.speed);
+  sus.phase+=dtS*(8+spd*0.25);
+  const roadNoise=Math.sin(sus.phase)*0.012*Math.min(1,spd/40);
+  sus.yV += (-sus.y*80 - sus.yV*12)*dtS;
+  sus.y += sus.yV*dtS;
+  c.mesh.position.y = Math.max(-0.06, sus.y + roadNoise);
+
+  // 合成旋转: 悬挂姿态 + 撞墙翻滚动画 (Z/X轴)
+  let rx=sus.pitch, rz=sus.roll;
   if(c.crashTimer>0){
     const t=1-(c.crashTimer/0.3);
-    c.mesh.rotation.z = c.crashAngle * Math.sin(t*Math.PI) * 0.8;
-    c.mesh.rotation.x = Math.sin(t*Math.PI) * 0.3;
-  } else {
-    c.mesh.rotation.z=0; c.mesh.rotation.x=0;
+    rz += c.crashAngle * Math.sin(t*Math.PI) * 0.8;
+    rx += Math.sin(t*Math.PI) * 0.3;
   }
+  c.mesh.rotation.z=rz;
+  c.mesh.rotation.x=rx;
+
   if(c.mesh.userData.frontWheels){
     const steer=(c===player)?(input.steer*0.5):0.3;
     for(const w of c.mesh.userData.frontWheels) w.rotation.y=steer;
@@ -2450,27 +2487,46 @@ function updateCamera(dt){
   if(!player) return;
   const c=player;
   const fwd=new THREE.Vector3(Math.sin(c.heading),0,Math.cos(c.heading));
+  const right=new THREE.Vector3(fwd.z,0,-fwd.x);
+  // yaw 率 (过弯摆动参考)
+  if(c._camPrevH===undefined) c._camPrevH=c.heading;
+  let dh=c.heading-c._camPrevH;
+  while(dh>Math.PI)dh-=2*Math.PI;
+  while(dh<-Math.PI)dh+=2*Math.PI;
+  const yawRate=dh/Math.max(dt,1e-3);
+  c._camPrevH=c.heading;
+  const spd=c.velocity.length();
   if(camMode===1){
-    // 第一人称: 驾驶员视角 (高于座舱, 前移越过鼻锥)
-    const eyePos=c.pos.clone().addScaledVector(fwd,0.8).add(new THREE.Vector3(0,0.85,0));
+    // 第一人称: 驾驶员视角 (放大1.5x后的座舱比例)
+    const eyePos=c.pos.clone().addScaledVector(fwd,1.2).add(new THREE.Vector3(0,1.15,0));
     camera.position.copy(eyePos);
     camLook.copy(c.pos).addScaledVector(fwd,40).add(new THREE.Vector3(0,0.15,0));
     camera.lookAt(camLook);
-    const tgtFov=78+THREE.MathUtils.clamp(c.speed/82,0,1)*14;
+    const tgtFov=76+THREE.MathUtils.clamp(spd/82,0,1)*14;
     camera.fov+=(tgtFov-camera.fov)*0.12; camera.updateProjectionMatrix();
     // 第一人称时隐藏自身车体 (避免遮挡)
     if(!c.mesh.userData._hidden){ c.mesh.visible=false; c.mesh.userData._hidden=true; }
   } else {
-    // 第三人称: 追尾
+    // 第三人称: 近低趴转播视角 (真实赛车游戏相机)
     if(c.mesh.userData._hidden){ c.mesh.visible=true; c.mesh.userData._hidden=false; }
-    const desired=c.pos.clone().addScaledVector(fwd,-11).add(new THREE.Vector3(0,5.5,0));
-    const k=1-Math.pow(0.0015,dt);
+    const desired=c.pos.clone().addScaledVector(fwd,-7.0).add(new THREE.Vector3(0,2.8,0));
+    // 相机惯性: 略慢的跟随, 不硬贴
+    const k=1-Math.pow(0.008,dt);
     camPos.lerp(desired,k);
     camera.position.copy(camPos);
-    camLook.copy(c.pos).addScaledVector(fwd,10).add(new THREE.Vector3(0,1.2,0));
+    // 注视点: 前方14m + 随yaw率横向摆动 (过弯时车身在画面中摆动 → 重量感)
+    camLook.copy(c.pos).addScaledVector(fwd,14)
+      .addScaledVector(right, THREE.MathUtils.clamp(-yawRate*1.2,-2.5,2.5))
+      .add(new THREE.Vector3(0,1.0,0));
     camera.lookAt(camLook);
-    const tgtFov=70+THREE.MathUtils.clamp(c.speed/82,0,1)*16;
+    const tgtFov=66+THREE.MathUtils.clamp(spd/82,0,1)*16;
     camera.fov+=(tgtFov-camera.fov)*0.08; camera.updateProjectionMatrix();
+  }
+  // 高速微颤 (贴地飞行感)
+  const vib=Math.max(0,(spd-50)/32)*0.06;
+  if(vib>0.001){
+    camera.position.x+=(Math.random()-0.5)*vib;
+    camera.position.y+=(Math.random()-0.5)*vib*0.7;
   }
   // 屏幕震动 (碰撞时) - 降低强度，加快衰减
   if(camShake>0.01){
@@ -2741,7 +2797,7 @@ function startRace(config){
   ui.lapTotal.textContent=totalLaps;
   ui.posTotal.textContent='/'+cars.length;
   ui.raceInfo.textContent=TRACK.name+' · '+TRACK.sub+' · '+totalLaps+' LAPS';
-  camPos.copy(player.pos).add(new THREE.Vector3(-11,5.5,0));
+  camPos.copy(player.pos).add(new THREE.Vector3(-7,2.8,0));
   camera.position.copy(camPos);
   for(const c of cars){ c.lapStartTime=0; }
   flashMsg('FORMATION', playerCfg.teamName + ' · ' + playerCfg.driver + ' · ' + TRACK.sub);
@@ -3379,6 +3435,7 @@ function playCrashSound(intensity){
 // 更新轮胎啸叫声
 function updateTireSound(slipAmount){
   if(!audioInitialized || !audioCtx || !tireScreechGain) return;
+  if(!isFinite(slipAmount)) slipAmount=0; // NaN 防护
   const targetVol = Math.max(0, Math.min(0.15, slipAmount * 0.25));
   tireScreechGain.gain.linearRampToValueAtTime(targetVol, audioCtx.currentTime+0.05);
   // 频率随滑移量变化
@@ -3394,7 +3451,10 @@ function updateEngineSound(){
     return;
   }
   const c=player;
-  const rpm=c.rpm;
+  // NaN 防护: rpm 非法时回退怠速 (防止 linearRamp 抛错)
+  let rpm=c.rpm;
+  if(!isFinite(rpm)) rpm=3000;
+  rpm=THREE.MathUtils.clamp(rpm,0,16000);
   // 频率: 80Hz(怠速) → 400Hz(红线)
   const freq=80+rpm/15000*320;
   engineOsc.frequency.linearRampToValueAtTime(freq, audioCtx.currentTime+0.05);
@@ -3722,9 +3782,9 @@ function loop(){
 function carCollisions(){
   for(let i=0;i<cars.length;i++)for(let j=i+1;j<cars.length;j++){
     const a=cars[i],b=cars[j];
-    // 宽相剔除: 车体对角线 ~2.05m, 两车最远距离 4.2m
+    // 宽相剔除: 车体对角线 ~3.1m, 两车最远距离 6.2m
     const dx=b.pos.x-a.pos.x, dz=b.pos.z-a.pos.z;
-    if(dx*dx+dz*dz > 4.2*4.2) continue;
+    if(dx*dx+dz*dz > 6.2*6.2) continue;
     // 进站车辆不参与碰撞
     if(a.pitting || b.pitting) continue;
     // 窄相: OBB vs OBB (SAT)
@@ -3762,6 +3822,9 @@ function carCollisions(){
     const tireHit = sev > 20 ? 5 : sev > 8 ? 3 : 1;
     a.tire = Math.max(0, a.tire - tireHit);
     b.tire = Math.max(0, b.tire - tireHit);
+    // 悬挂冲击 (重力感)
+    if(a._sus && sev > 3) a._sus.yV = Math.min(a._sus.yV, -sev * 0.02);
+    if(b._sus && sev > 3) b._sus.yV = Math.min(b._sus.yV, -sev * 0.02);
 
     // 高速重撞: 翻滚动画, 方向跟随偏航
     if(sev>22){
@@ -3813,7 +3876,7 @@ $('camBtn').addEventListener('click',toggleCam);
 (()=>{
   const c=makeCar(true,0); c.mesh.userData.isCar=true; player=c;
   ui.camMode.textContent='CHASE';
-  camPos.copy(c.pos).add(new THREE.Vector3(-11,5.5,0));
+  camPos.copy(c.pos).add(new THREE.Vector3(-7,2.8,0));
   camera.position.copy(camPos);
   const fwd=new THREE.Vector3(Math.sin(c.heading),0,Math.cos(c.heading));
   camera.lookAt(c.pos.clone().addScaledVector(fwd,10));

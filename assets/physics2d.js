@@ -29,8 +29,8 @@ const Physics2D = (function(){
     INV_MASS: 1/798,
     INERTIA: 2600,
     INV_INERTIA: 1/2600,
-    HALF_W: 0.62,   // 碰撞盒半宽 (与 game.js CAR_CORNERS 车模一致)
-    HALF_L: 1.95,   // 碰撞盒半长
+    HALF_W: 0.93,   // 碰撞盒半宽 (与放大1.5x后的车模/CAR_CORNERS一致, 真实F1宽~1.86m)
+    HALF_L: 2.93,   // 碰撞盒半长 (真实F1长~5.85m)
   };
   // 护墙 (TECPRO 吸能屏障)
   const WALL = {
@@ -71,10 +71,15 @@ const Physics2D = (function(){
   }
 
   // 在点 r 处施加冲量 (jx,jz), 更新线速度与角速度
+  // (运动学刚体分量跳过, 消除 Infinity*0=NaN)
   function applyImpulse(b, jx, jz, rx, rz){
-    b.velocity.x += jx * b._invMass;
-    b.velocity.z += jz * b._invMass;
-    b.angularVel += cross(rx,rz,jx,jz) * b._invInertia;
+    if(b._invMass > 0){
+      b.velocity.x += jx * b._invMass;
+      b.velocity.z += jz * b._invMass;
+    }
+    if(b._invInertia > 0){
+      b.angularVel += cross(rx,rz,jx,jz) * b._invInertia;
+    }
   }
 
   // ============================================================
@@ -221,6 +226,7 @@ const Physics2D = (function(){
 
     const jn = -(1 + CARCAR.RESTITUTION) * vn / kn;    // vn>0 → jn<0
     let jt = -vt / kt;
+    if(!isFinite(jn) || !isFinite(jt)){ separate(a, b, contact); return null; } // 双方均为运动学刚体等退化情形
     const maxF = CARCAR.FRICTION * Math.abs(jn);
     jt = Math.max(-maxF, Math.min(maxF, jt));
 
