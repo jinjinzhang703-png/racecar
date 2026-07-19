@@ -366,7 +366,8 @@ const PIT_ENTRY_X = -340;     // 入口 x 坐标
 const PIT_EXIT_X = 40;        // 出口 x 坐标
 const PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
 // 赛道围墙上的维修区开口 (视觉与碰撞共用): 入口/出口两段
-const PIT_WALL_GAPS = [ [-355, -310], [0, 60] ];
+// 入口 65m 宽 (真实 pit 入口很宽, 45° 斜切也能进), 出口 60m
+const PIT_WALL_GAPS = [ [-360, -295], [0, 60] ];
 // 位置是否处于维修区围墙开口 (主直道→维修通道之间 + 缺口 x 区间)
 function isPitGap(x, z){
   if(z < 316 || z > 346) return false;
@@ -678,8 +679,8 @@ const pitGroup = new THREE.Group();
 
   // === 内侧墙 (靠近赛道一侧, z=323) — 分段建造, 留出入口/出口开口 ===
   const innerWallZ = PIT_LANE_Z + PIT_LANE_HALF_W + 0.15; // z=323.15
-  const entryGap = 25;  // 入口开口宽度
-  const exitGap = 25;   // 出口开口宽度
+  const entryGap = 65;  // 入口开口宽度 (与 PIT_WALL_GAPS 碰撞开口对齐)
+  const exitGap = 60;   // 出口开口宽度
   const wallH = 1.2;
   // 入口前墙段 (从赛道起点到入口开口)
   const preWallLen = 20; // 入口前的短墙
@@ -828,9 +829,10 @@ scene.add(pitGroup);
 
 // 维修区检测: 判断车辆是否在维修通道内 (扩大范围, 包含入口/出口斜道)
 function isInPitLane(pos){
-  // 维修通道主体范围
+  // 维修通道主体范围 (z 向外扩展, 覆盖侧壁碰撞缓冲区,
+  // 防止车辆以微小穿透冲出通道落入赛道中心线碰撞)
   if(pos.x > PIT_ENTRY_X - 15 && pos.x < PIT_EXIT_X + 15 &&
-     pos.z > PIT_LANE_Z - PIT_LANE_HALF_W - 3 && pos.z < PIT_LANE_Z + PIT_LANE_HALF_W + 3){
+     pos.z > PIT_LANE_Z - PIT_LANE_HALF_W - 8 && pos.z < PIT_LANE_Z + PIT_LANE_HALF_W + 7){
     return true;
   }
   // 入口斜道范围 (从赛道 z=340 到通道 z=323)
@@ -1623,6 +1625,37 @@ function getCarCorners(c){
   return result;
 }
 
+// 维修通道侧壁碰撞: 与赛道墙一致的冲量物理, 但用通道自己的边界
+function pitLaneWallCollision(c){
+  const Z_OUT = PIT_LANE_Z - PIT_LANE_HALF_W; // 313 外墙 (维修站一侧)
+  const Z_IN  = PIT_LANE_Z + PIT_LANE_HALF_W; // 323 内墙 (赛道一侧)
+  let touched = false, maxVn = 0;
+  for(const corner of getCarCorners(c)){
+    if(corner.z < Z_OUT){
+      // 外墙: 法线 +z (推回通道)
+      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, 1, Z_OUT - corner.z);
+      if(res){ touched = true; maxVn = Math.max(maxVn, Math.abs(res.vn)); }
+    } else if(corner.z > Z_IN && !isPitGap(corner.x, corner.z)){
+      // 内墙 (非开口段): 法线 -z (推回通道)
+      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, -1, corner.z - Z_IN);
+      if(res){ touched = true; maxVn = Math.max(maxVn, Math.abs(res.vn)); }
+    }
+  }
+  if(touched){
+    // speed 同步: 前向投影 (与 barrierCollision 一致)
+    const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+    c.speed = c.velocity.x*fx + c.velocity.z*fz;
+    // 碰撞锁定: 让反弹积分, 防止街机模型立刻把速度推回去
+    if(maxVn > 8){
+      c.collisionLock = Math.max(c.collisionLock, 0.08);
+      c.collisionVel.copy(c.velocity);
+      c.collisionSpin = c.angularVel || 0;
+    }
+    // 轻微火花提示 (仅玩家)
+    if(c.isPlayer && Math.abs(c.speed) > 5){ spawnSparks(c.pos.clone(), 2); }
+  }
+}
+
 function barrierCollision(c){
   let hit=false;
   let seg = nearestSegment(c.pos);
@@ -1630,6 +1663,8 @@ function barrierCollision(c){
 
   // 在维修通道内或正在进站时, 不执行赛道围栏碰撞 (允许车辆驶入维修区)
   if(c.pitting || isInPitLane(c.pos)){
+    // 维修通道两侧围墙: 真实的柔和碰撞 (防止高速冲出通道被隐形边界猛烈弹回)
+    if(!c.pitting) pitLaneWallCollision(c);
     c._lastHit = false;
     c.offTrack = false;
     return { seg, hit: false };
@@ -1693,7 +1728,7 @@ function barrierCollision(c){
         if(ov > reOV){ reOV=ov; reN=csC.normal; reS=Math.sign(csC.lateral); }
       }
       if(reOV <= 0) break;
-      c.pos.addScaledVector(reN, -reS * (reOV * 0.5 + 0.02));
+      c.pos.addScaledVector(reN, -reS * (Math.min(reOV, 1.0) * 0.5 + 0.02)); // 限幅防大力弹射
     }
 
     // 撞击烈度: 法向接近速度 (真实物理量, 沿墙刮擦不再误判为重撞)
@@ -1970,7 +2005,7 @@ function updatePlayer(dt){
     }
     const csC = nearestSegment(c.pos);
     if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
-    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (worstOV + 0.05));
+    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (Math.min(worstOV, 1.0) + 0.05)); // 限幅防大力弹射
   }
 
   // 齿轮 / RPM (基于真实换挡曲线)
@@ -2369,7 +2404,7 @@ function updateAI(c, dt){
     }
     const csC = nearestSegment(c.pos);
     if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
-    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (worstOV + 0.05));
+    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (Math.min(worstOV, 1.0) + 0.05)); // 限幅防大力弹射
   }
   // 撞墙: 仅在重撞时触发恢复模式, 轻擦则继续滑行
   if(collResult&&collResult.hit){

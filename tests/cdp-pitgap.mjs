@@ -83,7 +83,7 @@ try{
   await evalJs(`input.acc=false; 'ok'`);
 
   console.log('[2] 停在维修区 → 自动换胎');
-  await evalJs(`player.speed=0; player.velocity.set(0,0,0); 'ok'`);
+  await evalJs(`player.speed=0; player.velocity.set(0,0,0); player.tire=50; 'ok'`);
   await waitFor(`pitGame.active===true`, 15000, '自动触发换胎小游戏');
   check('停车自动触发换胎小游戏', true);
   // 完成小游戏 (按提示序列按键)
