@@ -481,6 +481,10 @@ window.MPraceTick = function(dt){
     p:[+player.pos.x.toFixed(2), +player.pos.y.toFixed(2), +player.pos.z.toFixed(2)],
     h:+player.heading.toFixed(3), v:+player.speed.toFixed(1),
     prog:+player.progress.toFixed(4), lap:player.lap,
+    // 3D 姿态 (起飞/翻车同步)
+    y:+player.y.toFixed(2), vy:+player.vy.toFixed(2),
+    rl:+player.roll.toFixed(3), pt:+player.pitch3d.toFixed(3),
+    air:player.airborne?1:0, flp:player.flipped?1:0,
   };
   if(MP.isHost){
     Net.broadcast(s);
@@ -491,7 +495,10 @@ window.MPraceTick = function(dt){
         ai.push({ s:c.gridSlot,
           p:[+c.pos.x.toFixed(2), +c.pos.y.toFixed(2), +c.pos.z.toFixed(2)],
           h:+c.heading.toFixed(3), v:+c.speed.toFixed(1),
-          prog:+c.progress.toFixed(4), lap:c.lap });
+          prog:+c.progress.toFixed(4), lap:c.lap,
+          y:+c.y.toFixed(2), vy:+c.vy.toFixed(2),
+          rl:+c.roll.toFixed(3), pt:+c.pitch3d.toFixed(3),
+          air:c.airborne?1:0, flp:c.flipped?1:0 });
       }
     }
     if(ai.length) Net.broadcast({ t:'ai', cars:ai });
@@ -519,6 +526,12 @@ function applyNetState(key, m){
   c._netNext = { p:m.p, h:m.h, v:m.v, t:performance.now() };
   c.progress = m.prog;
   c.lap = m.lap;
+  // 3D 姿态同步
+  if(m.y !== undefined){
+    c.y = m.y; c.vy = m.vy || 0;
+    c.roll = m.rl || 0; c.pitch3d = m.pt || 0;
+    c.airborne = !!m.air; c.flipped = !!m.flp;
+  }
 }
 
 function markRemoteDnf(id){

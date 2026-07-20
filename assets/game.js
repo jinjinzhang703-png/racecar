@@ -1567,6 +1567,12 @@ function makeCar(isPlayer, gridSlot){
     pitBoxIdx: isPlayer ? 0 : Math.floor(Math.random() * NCARS), // 分配的维修位索引 (会在startRace中去重)
     crashTimer:0, crashAngle:0,
     inReverse:false, reverseTimer:0, // 倒车状态
+    // === 3D 姿态 (真实物理: 起飞/侧翻/俯仰) ===
+    y:0, vy:0,               // 离地高度 (m) / 垂直速度 (m/s)
+    roll:0, rollV:0,         // 侧倾角 (绕纵轴, rad) / 侧翻角速度
+    pitch3d:0, pitchV:0,     // 俯仰角 (绕横轴) / 角速度
+    airborne:false,          // 离地飞行中
+    flipped:false, flipTimer:0, // 翻车 (倒扣) 与救援倒计时
     // 碰撞锁定: >0时挂起正常速度重建, 让碰撞响应真正生效
     collisionLock:0,
     collisionVel:new THREE.Vector3(),
@@ -1769,6 +1775,8 @@ function barrierCollision(c){
     c.tire = Math.max(0, c.tire - tireHit);
     // 悬挂冲击: 车身向下"砸"一下再回弹 (重力感)
     if(c._sus && impact > 4) c._sus.yV = Math.min(c._sus.yV, -impact * 0.02);
+    // 高速正撞护墙: 轻微弹离地面 (真实: 车头骑上护墙缓冲块)
+    if(impact > 25 && !c.airborne){ c.vy += impact * 0.04; c.airborne = true; }
   }
 
   c._lastHit = hit;
@@ -1828,6 +1836,14 @@ function updatePlayer(dt){
   // 碰撞冷却期: 防止反复碰撞
   if(c.collisionCooldown > 0){
     c.collisionCooldown -= dt;
+  }
+  // 离地/翻车: 无驱动抓地力, 按弹道滑行 (3D 姿态由 integrate3D 积分)
+  if(c.airborne || c.flipped || c.y > 0){
+    c.pos.addScaledVector(c.velocity, dt);
+    barrierCollision(c);
+    applyMesh(c);
+    updateProgress(c, dt);
+    return;
   }
   if(race.phase==='menu'||race.phase==='paused'||race.phase==='over'){ c.speed*=0.9; }
   if(c.holdTimer>0){
@@ -2062,6 +2078,14 @@ function updateAI(c, dt){
     c.collisionCooldown -= dt;
   }
   if(race.phase!=='racing'){ c.speed*=0.9; applyMesh(c); updateProgress(c,dt); return; }
+  // 离地/翻车: 无驱动抓地力, 按弹道滑行 (3D 姿态由 integrate3D 积分)
+  if(c.airborne || c.flipped || c.y > 0){
+    c.pos.addScaledVector(c.velocity, dt);
+    barrierCollision(c);
+    applyMesh(c);
+    updateProgress(c, dt);
+    return;
+  }
 
   // === AI 进站状态机 (真正驶入维修通道) ===
   if(c.pitting){
@@ -2453,10 +2477,10 @@ function applyMesh(c){
   const roadNoise=Math.sin(sus.phase)*0.012*Math.min(1,spd/40);
   sus.yV += (-sus.y*80 - sus.yV*12)*dtS;
   sus.y += sus.yV*dtS;
-  c.mesh.position.y = Math.max(-0.06, sus.y + roadNoise);
+  c.mesh.position.y = (c.y||0) + Math.max(-0.06, sus.y + roadNoise);
 
-  // 合成旋转: 悬挂姿态 + 撞墙翻滚动画 (Z/X轴)
-  let rx=sus.pitch, rz=sus.roll;
+  // 合成旋转: 悬挂姿态 + 3D物理姿态(起飞/翻车) + 撞墙翻滚动画 (Z/X轴)
+  let rx=sus.pitch + (c.pitch3d||0), rz=sus.roll + (c.roll||0);
   if(c.crashTimer>0){
     const t=1-(c.crashTimer/0.3);
     rz += c.crashAngle * Math.sin(t*Math.PI) * 0.8;
@@ -2562,6 +2586,65 @@ function completeLap(c){
 }
 
 // ============================================================
+//  3D 姿态积分 (真实物理: 重力 -9.8m/s², 落地冲击, 翻车与救援)
+// ============================================================
+const FLIP_ANGLE = 1.65; // ~95°, 超过则翻车 (F1 低重心, 很难翻 — 需要大起飞)
+function integrate3D(c, dt){
+  // ---- 离地飞行: 弹道 + 角动量守恒 ----
+  if(c.airborne || c.y > 0){
+    c.y += c.vy * dt;
+    c.vy -= 9.8 * dt;
+    c.roll += c.rollV * dt;
+    c.pitch3d += c.pitchV * dt;
+    c.rollV *= Math.max(0, 1 - 0.3*dt);   // 空气阻力微阻尼
+    c.pitchV *= Math.max(0, 1 - 0.3*dt);
+    if(c.y <= 0){
+      c.y = 0;
+      const impact = Math.max(0, -c.vy);
+      // 落地冲击: 悬挂压缩 + 可能的小二次弹跳
+      if(c._sus) c._sus.yV -= Math.min(2.5, impact * 0.2);
+      if(impact > 2){
+        spawnSparks(c.pos.clone(), Math.min(14, Math.floor(impact * 1.5)));
+        if(c.isPlayer){ camShake = Math.max(camShake, impact / 18); playCrashSound(Math.min(1, impact / 12)); }
+      }
+      c.vy = impact > 3 ? impact * 0.25 : 0;   // 大落地小弹起
+      c.airborne = c.vy > 0.5;
+      if(!c.airborne){
+        c.rollV *= 0.4;
+        // 落地姿态超过翻车角 → 翻车 (倒扣)
+        if(Math.abs(c.roll) > FLIP_ANGLE && !c.flipped){
+          c.flipped = true;
+          c.flipTimer = 3.0;
+          if(c.isPlayer) flashMsg('FLIPPED','翻车! 等待救援...');
+        }
+      }
+    }
+  } else {
+    // ---- 地面: 姿态弹簧回零 (悬挂回正) ----
+    c.roll += c.rollV * dt;
+    c.rollV += (-c.roll * 10 - c.rollV * 6) * dt;
+    c.pitch3d += c.pitchV * dt;
+    c.pitchV += (-c.pitch3d * 10 - c.pitchV * 6) * dt;
+    if(Math.abs(c.roll) < 0.001) c.roll = 0;
+    if(Math.abs(c.pitch3d) < 0.001) c.pitch3d = 0;
+  }
+  // ---- 翻车状态: 倒扣滑行, 倒计时救援 ----
+  if(c.flipped){
+    c.roll += (Math.sign(c.roll || 1) * Math.PI - c.roll) * 4 * dt; // 倒扣到 ±180°
+    c.rollV = 0;
+    c.speed *= Math.max(0, 1 - 2.5*dt);   // 车顶摩擦减速
+    c.velocity.multiplyScalar(Math.max(0, 1 - 2.5*dt));
+    c.flipTimer -= dt;
+    if(c.flipTimer <= 0){
+      c.flipped = false;
+      c.roll = 0; c.rollV = 0; c.pitch3d = 0; c.pitchV = 0; c.vy = 0;
+      resetCarToTrack(c);
+      if(c.isPlayer) flashMsg('RESCUED','已救援回赛道 · 罚时3秒');
+    }
+  }
+}
+
+// ============================================================
 //  相机: 第三人称(跟车) / 第一人称(座舱) — C键切换
 // ============================================================
 let camMode=0; // 0=第三人称, 1=第一人称
@@ -2583,9 +2666,9 @@ function updateCamera(dt){
   const spd=c.velocity.length();
   if(camMode===1){
     // 第一人称: 驾驶员视角 (放大1.5x后的座舱比例)
-    const eyePos=c.pos.clone().addScaledVector(fwd,1.2).add(new THREE.Vector3(0,1.15,0));
+    const eyePos=c.pos.clone().addScaledVector(fwd,1.2).add(new THREE.Vector3(0,1.15+(c.y||0),0));
     camera.position.copy(eyePos);
-    camLook.copy(c.pos).addScaledVector(fwd,40).add(new THREE.Vector3(0,0.15,0));
+    camLook.copy(c.pos).addScaledVector(fwd,40).add(new THREE.Vector3(0,0.15+(c.y||0),0));
     camera.lookAt(camLook);
     const tgtFov=76+THREE.MathUtils.clamp(spd/82,0,1)*14;
     camera.fov+=(tgtFov-camera.fov)*0.12; camera.updateProjectionMatrix();
@@ -2594,7 +2677,7 @@ function updateCamera(dt){
   } else {
     // 第三人称: 近低趴转播视角 (真实赛车游戏相机)
     if(c.mesh.userData._hidden){ c.mesh.visible=true; c.mesh.userData._hidden=false; }
-    const desired=c.pos.clone().addScaledVector(fwd,-7.0).add(new THREE.Vector3(0,2.8,0));
+    const desired=c.pos.clone().addScaledVector(fwd,-7.0).add(new THREE.Vector3(0,2.8+(c.y||0)*0.8,0));
     // 相机惯性: 略慢的跟随, 不硬贴
     const k=1-Math.pow(0.008,dt);
     camPos.lerp(desired,k);
@@ -2602,7 +2685,7 @@ function updateCamera(dt){
     // 注视点: 前方14m + 随yaw率横向摆动 (过弯时车身在画面中摆动 → 重量感)
     camLook.copy(c.pos).addScaledVector(fwd,14)
       .addScaledVector(right, THREE.MathUtils.clamp(-yawRate*1.2,-2.5,2.5))
-      .add(new THREE.Vector3(0,1.0,0));
+      .add(new THREE.Vector3(0,1.0+(c.y||0)*0.7,0));
     camera.lookAt(camLook);
     const tgtFov=66+THREE.MathUtils.clamp(spd/82,0,1)*16;
     camera.fov+=(tgtFov-camera.fov)*0.08; camera.updateProjectionMatrix();
@@ -3389,24 +3472,27 @@ function tryPit(){
   startPitMiniGame();
 }
 
-// 重置玩家到赛道中心 (R键)
-function resetPlayerToTrack(){
-  const c=player;
+// 重置任意车辆到最近赛道点 (翻车救援/AI通用)
+function resetCarToTrack(c){
   const near=nearestSample(c.pos);
   // nearestSample 返回 {idx, dist}, 无 t 属性; 用 idx/NSAMP 推导参数
   const t = near.idx / NSAMP;
   const p = curve.getPointAt(t);
   const tangent = curve.getTangentAt(t);
-  c.pos.copy(p); c.pos.y=0.6;
+  c.pos.copy(p); c.pos.y=0;
   c.heading = Math.atan2(tangent.x, tangent.z);
   c.velocity.set(0,0,0);
   c.speed=0;
   c.angularVel=0; c.collisionSpin=0; c.collisionLock=0;
-  c.inReverse=false;
-  c.reverseTimer=0;
+  c.inReverse=false; c.reverseTimer=0;
   c.crashTimer=0;
+  if(c.isPlayer) raceClock+=3; // 玩家罚时
+}
+
+// 重置玩家到赛道中心 (R键)
+function resetPlayerToTrack(){
+  resetCarToTrack(player);
   flashMsg('RESET','车辆已重置 · 罚时3秒');
-  raceClock+=3; // 重置罚时
 }
 
 // 计算与前车的时间差 (秒), 返回 {ahead: car|null, gapSeconds: number}
@@ -3838,13 +3924,14 @@ function loop(){
 
   if(race.phase==='racing'||race.phase==='grid'){
     updateRace(dt);
+    integrate3D(player, dt); // 3D 姿态积分 (起飞/翻车)
     updatePlayer(dt);
     for(const c of cars){
+      if(c.isPlayer) continue;
+      integrate3D(c, dt);    // AI/远程车同样积分 3D 姿态
       if(c.isRemote){ updateRemoteCar(c); continue; } // 联机: 网络驱动的车不跑AI
-      if(!c.isPlayer){
-        try{ updateAI(c,dt); }
-        catch(e){ console.warn('AI error:', e); }
-      }
+      try{ updateAI(c,dt); }
+      catch(e){ console.warn('AI error:', e); }
     }
     if(typeof window.MPraceTick==='function') window.MPraceTick(dt); // 联机状态广播 (20Hz)
     try{ carCollisions(); } catch(e){}
@@ -3962,6 +4049,24 @@ function carCollisions(){
     if(!res) continue; // 已在分离, 仅位置修正
     const sev = Math.abs(res.vn); // 法向接近速度 (真实物理量)
     if(sev < 1.5) continue;
+
+    // === 3D 起飞/侧翻 (真实物理: 侧面受力 → 轮胎攀爬起飞 + 向外侧翻) ===
+    // F1 重心极低 (~0.28m), 只有侧向高速撞击才会起飞 — 与真实一致
+    if(sev > 14){
+      for(const [c, sgn] of [[a,-1],[b,1]]){
+        if(c.isRemote || c.airborne) continue;
+        const rcx = Math.cos(c.heading), rcz = -Math.sin(c.heading); // 车右方向
+        const latForce = (res.nx*rcx + res.nz*rcz) * sgn; // 冲击力在该车横向的分量
+        if(Math.abs(latForce) > 0.45){
+          // 轮胎攀爬: 侧向高速接触把对方"撬"起来
+          const climb = (sev-14)*0.18 + Math.abs(res.vt)*0.04;
+          c.vy += Math.min(8, 1.5 + climb);
+          c.airborne = true;
+          // 向外侧翻 (远离撞击方向), 撞击越狠翻得越快
+          c.rollV += (latForce > 0 ? -1 : 1) * Math.min(3, 0.5 + sev*0.04);
+        }
+      }
+    }
 
     // 碰撞锁定: 让冲量结果积分 (本地车)
     const lockT = 0.05 + Math.min(0.07, sev*0.0012);
