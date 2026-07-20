@@ -3486,7 +3486,11 @@ function resetCarToTrack(c){
   c.angularVel=0; c.collisionSpin=0; c.collisionLock=0;
   c.inReverse=false; c.reverseTimer=0;
   c.crashTimer=0;
-  if(c.isPlayer) raceClock+=3; // 玩家罚时
+  if(c.isPlayer){
+    raceClock+=3; // 玩家罚时
+    // 相机立即归位 (避免从旧位置横穿地图飞回)
+    camPos.copy(c.pos).add(new THREE.Vector3(-Math.sin(c.heading)*7, 2.8, -Math.cos(c.heading)*7));
+  }
 }
 
 // 重置玩家到赛道中心 (R键)

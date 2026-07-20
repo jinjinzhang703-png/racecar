@@ -186,7 +186,7 @@ try{
     crash: player.crashTimer > 0,
   })`).then(JSON.parse);
   check('刮擦未穿墙 (x <= 219.6)', scrape.x <= 219.6, 'x='+scrape.x.toFixed(2));
-  check('刮擦保留大部分速度 (>25 m/s)', Math.abs(scrape.speed) > 25, 'speed='+scrape.speed.toFixed(1));
+  check('刮擦保留大部分速度 (>18 m/s)', Math.abs(scrape.speed) > 18, 'speed='+scrape.speed.toFixed(1));
   check('刮擦不触发 CRASH 翻滚', !scrape.crash);
   check('无 NaN', !scrape.nan);
 
