@@ -52,7 +52,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 
-// ---------- 夜赛场景 (明亮) ----------
+// ---------- 场景 ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x253050);
 scene.fog = new THREE.FogExp2(0x253050, 0.00025);
@@ -60,7 +60,7 @@ scene.fog = new THREE.FogExp2(0x253050, 0.00025);
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.3, 4000);
 camera.position.set(0, 60, 60);
 
-// 夜赛灯光：平衡亮度与性能
+// 灯光 (参数随赛道环境 applyEnv 调整)
 const ambient = new THREE.AmbientLight(0x7788bb, 0.6);
 scene.add(ambient);
 const hemi = new THREE.HemisphereLight(0x8aacee, 0x303850, 0.9);
@@ -73,73 +73,96 @@ moon.shadow.camera.near = 50; moon.shadow.camera.far = 1500;
 const mc = moon.shadow.camera; mc.left=-500; mc.right=500; mc.top=500; mc.bottom=-500;
 scene.add(moon);
 
-// ---------- 地面 ----------
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(8000,8000),
-  new THREE.MeshStandardMaterial({ color:0x1a1e2e, roughness:0.85, metalness:0.1 })
-);
-ground.rotation.x = -Math.PI/2; ground.position.y = -0.05;
-ground.receiveShadow = true;
-scene.add(ground);
+// ---------- 赛道世界组 (切赛道时整体重建) ----------
+let trackGroup = new THREE.Group();
+scene.add(trackGroup);
+
+// 应用赛道环境 (光照/天空/雾/地面色/车头灯)
+function applyEnv(env){
+  if(!env) return;
+  scene.background.set(env.sky);
+  scene.fog.color.set(env.fog[0]);
+  scene.fog.density = env.fog[1];
+  ambient.color.set(env.ambient[0]); ambient.intensity = env.ambient[1];
+  hemi.color.set(env.hemi[0]); hemi.groundColor.set(env.hemi[1]); hemi.intensity = env.hemi[2];
+  moon.color.set(env.sun[0]); moon.intensity = env.sun[1];
+  moon.position.set(...env.sun[2]);
+  window.__headlightOn = !!env.headlight;
+}
 
 // ============================================================
-//  赛道加载 — 数据定义在 assets/tracks.js (TRACKS)
-//  当前选中赛道由 TRACK.id 决定, 默认第一条可用赛道
+//  赛道系统 — 数据在 assets/tracks.js, 支持运行时切换赛道
+//  computeTrackData(trackDef) 重算全部派生数据;
+//  buildTrackWorld(trackDef) 重建场景 (见下文各构建函数)
 // ============================================================
-const TRACK = TRACKS.find(t=>t.available) || TRACKS[0];
-const WP = TRACK.wp;
-const CORNER_NAMES = TRACK.cornerNames;
+let currentTrack = TRACKS.find(t=>t.available) || TRACKS[0];
+let WP, CORNER_NAMES, N_WP, S1_END, S2_END, DRS_ZONES, PIT_ZONE;
+let waypoints, curve;
 const ROAD_W = 16, HALF_W = ROAD_W/2;
 const WALL_OFFSET = 0.8;  // 围栏距赛道边 (视觉与碰撞统一)
 const WALL_DIST = HALF_W + WALL_OFFSET; // =8.8, 视觉与碰撞共用
-const N_WP = WP.length;
-const S1_END = TRACK.sectorEnds[0]/N_WP, S2_END = TRACK.sectorEnds[1]/N_WP;
-const DRS_ZONES = TRACK.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
-const PIT_ZONE = TRACK.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
-
-// 构建闭合曲线
-const waypoints = WP.map(p=>new THREE.Vector3(p[0],0,p[1]));
-const curve = new THREE.CatmullRomCurve3(waypoints, true, 'centripetal', 0.5);
-
-// 稠密采样点
 const NSAMP = 600;
 const SAMPLES = [];
 const TANGENTS = [];
 const SIDENORMALS = [];
 const RACING_LINE_OFFSET = []; // 每个采样点的理想走线横向偏移 (-1=左, 1=右)
-const sp = curve.getSpacedPoints(NSAMP-1);
-for(let i=0;i<NSAMP;i++){
-  SAMPLES.push(sp[i].clone());
-  const t = curve.getTangentAt(i/NSAMP).normalize();
-  TANGENTS.push(t);
-  SIDENORMALS.push(new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), t).normalize());
-}
-// 预计算赛道曲率和理想走线偏移
-for(let i=0;i<NSAMP;i++){
-  // 通过相邻切线的角度差计算曲率
-  const look = 4; // 前后各看4个点
-  const t1 = TANGENTS[((i-look)%NSAMP+NSAMP)%NSAMP];
-  const t2 = TANGENTS[(i+look)%NSAMP];
-  const crossY = t1.x*t2.z - t1.z*t2.x; // 叉积Y分量 = sin(theta)
-  const dot = t1.x*t2.x + t1.z*t2.z;    // 点积 = cos(theta)
-  // crossY > 0: 左转, crossY < 0: 右转
-  // 曲率越大, 走线越靠内侧
-  const curvature = Math.atan2(Math.abs(crossY), dot); // 0~PI
-  // 理想走线: 弯道内侧偏移, 直道中线
-  const cornerIntensity = THREE.MathUtils.clamp(curvature*2.5, 0, 1); // 0=直道, 1=急弯
-  const innerSide = Math.sign(crossY); // +1=左转内侧(右), -1=右转内侧(左)
-  // 走线偏移: 直道=0, 弯道内侧偏移, 偏移量受cornerIntensity控制
-  RACING_LINE_OFFSET.push(innerSide * cornerIntensity * 0.65);
-}
-// 平滑走线 (3次移动平均)
-for(let pass=0;pass<3;pass++){
-  const smooth=[];
+const CURVATURE = [];
+
+function computeTrackData(trackDef){
+  currentTrack = trackDef;
+  WP = trackDef.wp;
+  CORNER_NAMES = trackDef.cornerNames;
+  N_WP = WP.length;
+  S1_END = trackDef.sectorEnds[0]/N_WP;
+  S2_END = trackDef.sectorEnds[1]/N_WP;
+  DRS_ZONES = trackDef.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
+  PIT_ZONE = trackDef.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
+
+  // 构建闭合曲线
+  waypoints = WP.map(p=>new THREE.Vector3(p[0],0,p[1]));
+  curve = new THREE.CatmullRomCurve3(waypoints, true, 'centripetal', 0.5);
+
+  // 稠密采样点
+  SAMPLES.length = 0; TANGENTS.length = 0; SIDENORMALS.length = 0;
+  RACING_LINE_OFFSET.length = 0; CURVATURE.length = 0;
+  const sp = curve.getSpacedPoints(NSAMP-1);
   for(let i=0;i<NSAMP;i++){
-    const p=(RACING_LINE_OFFSET[((i-1)%NSAMP+NSAMP)%NSAMP]+RACING_LINE_OFFSET[i]+RACING_LINE_OFFSET[(i+1)%NSAMP])/3;
-    smooth.push(p);
+    SAMPLES.push(sp[i].clone());
+    const t = curve.getTangentAt(i/NSAMP).normalize();
+    TANGENTS.push(t);
+    SIDENORMALS.push(new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), t).normalize());
   }
-  for(let i=0;i<NSAMP;i++) RACING_LINE_OFFSET[i]=smooth[i];
+  // 预计算赛道曲率和理想走线偏移
+  for(let i=0;i<NSAMP;i++){
+    const look = 4;
+    const t1 = TANGENTS[((i-look)%NSAMP+NSAMP)%NSAMP];
+    const t2 = TANGENTS[(i+look)%NSAMP];
+    const crossY = t1.x*t2.z - t1.z*t2.x;
+    const dot = t1.x*t2.x + t1.z*t2.z;
+    const curvature = Math.atan2(Math.abs(crossY), dot);
+    const cornerIntensity = THREE.MathUtils.clamp(curvature*2.5, 0, 1);
+    const innerSide = Math.sign(crossY);
+    RACING_LINE_OFFSET.push(innerSide * cornerIntensity * 0.65);
+  }
+  // 平滑走线 (3次移动平均)
+  for(let pass=0;pass<3;pass++){
+    const smooth=[];
+    for(let i=0;i<NSAMP;i++){
+      const p=(RACING_LINE_OFFSET[((i-1)%NSAMP+NSAMP)%NSAMP]+RACING_LINE_OFFSET[i]+RACING_LINE_OFFSET[(i+1)%NSAMP])/3;
+      smooth.push(p);
+    }
+    for(let i=0;i<NSAMP;i++) RACING_LINE_OFFSET[i]=smooth[i];
+  }
+  // 预计算曲率数组 (用于AI弯道减速, 向心加速度公式 v²=a/κ)
+  for(let i=0;i<NSAMP;i++){
+    const ta=TANGENTS[(i-3+NSAMP)%NSAMP], tb=TANGENTS[(i+3)%NSAMP];
+    const dot=THREE.MathUtils.clamp(ta.x*tb.x+ta.z*tb.z, -1, 1);
+    const ang=Math.acos(dot);
+    const arc=6*SAMPLES[1].distanceTo(SAMPLES[0]);
+    CURVATURE.push(ang/Math.max(1e-3,arc));
+  }
 }
+computeTrackData(currentTrack);
 function sideNormalAt(i){ return SIDENORMALS[i]; }
 function racingLinePoint(i){
   const p=SAMPLES[i].clone();
@@ -147,15 +170,6 @@ function racingLinePoint(i){
   const offset=RACING_LINE_OFFSET[i]*HALF_W*0.75;
   p.addScaledVector(n, offset);
   return p;
-}
-// 预计算曲率数组 (用于AI弯道减速, 向心加速度公式 v²=a/κ)
-const CURVATURE=[];
-for(let i=0;i<NSAMP;i++){
-  const ta=TANGENTS[(i-3+NSAMP)%NSAMP], tb=TANGENTS[(i+3)%NSAMP];
-  const dot=THREE.MathUtils.clamp(ta.x*tb.x+ta.z*tb.z, -1, 1);
-  const ang=Math.acos(dot);
-  const arc=6*SAMPLES[1].distanceTo(SAMPLES[0]);
-  CURVATURE.push(ang/Math.max(1e-3,arc));
 }
 
 // ---------- 程序化沥青纹理 (灰色颗粒感) ----------
@@ -222,7 +236,7 @@ function buildRoad(){
   });
   const mesh=new THREE.Mesh(g,m); mesh.receiveShadow=true; return mesh;
 }
-scene.add(buildRoad());
+// 由 buildTrackWorld 调用
 
 // ---------- 边线（白）+ 中心虚线 + 起终点 ----------
 function buildEdge(side){
@@ -239,7 +253,7 @@ function buildEdge(side){
   g.setIndex(idx); g.computeVertexNormals();
   return new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xe0e0e0,roughness:0.5,emissive:0x404040,emissiveIntensity:0.3}));
 }
-scene.add(buildEdge(1)); scene.add(buildEdge(-1));
+// 由 buildTrackWorld 调用
 
 function buildCenter(){
   const grp=new THREE.Group();
@@ -254,10 +268,10 @@ function buildCenter(){
   }
   return grp;
 }
-scene.add(buildCenter());
+// 由 buildTrackWorld 调用
 
 // ---------- 转弯路牌标识 (弯道前 80m / 40m) ----------
-(()=>{
+function buildCornerSigns(){
   // 检测弯道起点: 曲率从低到高的过渡点
   const corners = []; // {sampleIdx, direction: 'L'|'R', name}
   const KAPPA_THRESH = 0.008;
@@ -338,8 +352,8 @@ scene.add(buildCenter());
       signGroup.add(pole);
     }
   }
-  scene.add(signGroup);
-})();
+  trackGroup.add(signGroup);
+}
 
 function makeChecker(){
   const c=document.createElement('canvas'); c.width=c.height=64;
@@ -347,27 +361,26 @@ function makeChecker(){
   for(let i=0;i<8;i++)for(let j=0;j<8;j++){x.fillStyle=((i+j)&1)?'#fff':'#111';x.fillRect(i*8,j*8,8,8);}
   return c;
 }
-(()=>{
+function buildStartGrid(){
   const p=SAMPLES[0];
   const tex=new THREE.CanvasTexture(makeChecker());
   const m=new THREE.Mesh(new THREE.PlaneGeometry(HALF_W*2,3),new THREE.MeshStandardMaterial({map:tex,roughness:0.7}));
   m.rotation.x=-Math.PI/2; m.position.set(p.x,0.06,p.z);
   m.rotation.z = Math.atan2(TANGENTS[0].x, TANGENTS[0].z);
-  scene.add(m);
-})();
+  trackGroup.add(m);
+}
 
 // ============================================================
 //  专业围栏系统: TECPRO红白块 + 轮胎墙 + 高碎片围栏
 // ============================================================
-// 维修区通道常量 (提前定义: 围墙建造需要引用开口)
-const PIT_LANE_Z = 318;       // 维修通道中心 z 坐标
-const PIT_LANE_HALF_W = 5;    // 维修通道半宽 (10m 宽)
-const PIT_ENTRY_X = -340;     // 入口 x 坐标
-const PIT_EXIT_X = 40;        // 出口 x 坐标
-const PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
-// 赛道围墙上的维修区开口 (视觉与碰撞共用): 入口/出口两段
-// 入口 65m 宽 (真实 pit 入口很宽, 45° 斜切也能进), 出口 60m
-const PIT_WALL_GAPS = [ [-360, -295], [0, 60] ];
+// 维修区通道常量 (随赛道配置变化, buildTrackWorld 时赋值)
+let PIT_LANE_Z = 318;       // 维修通道中心 z 坐标
+let PIT_LANE_HALF_W = 5;    // 维修通道半宽 (10m 宽)
+let PIT_ENTRY_X = -340;     // 入口 x 坐标
+let PIT_EXIT_X = 40;        // 出口 x 坐标
+let PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
+// 赛道围墙上的维修区开口 (视觉与碰撞共用)
+let PIT_WALL_GAPS = [ [-360, -295], [0, 60] ];
 // 位置是否处于维修区围墙开口 (主直道→维修通道之间 + 缺口 x 区间)
 function isPitGap(x, z){
   if(z < 316 || z > 346) return false;
@@ -376,7 +389,7 @@ function isPitGap(x, z){
 }
 
 // --- TECPRO 连续墙体 (红白条纹三角带, 替代分段盒) ---
-(()=>{
+function buildTecproWall(){
   // 红白条纹纹理 (画布生成, 每~3m一段红/白)
   const cvs=document.createElement('canvas');
   cvs.width=8; cvs.height=8;
@@ -419,11 +432,11 @@ function isPitGap(x, z){
     return m;
   }
   // TECPRO 主墙: 高1.2m, offset 0.8 (与WALL_DIST一致)
-  scene.add(buildWallRing(WALL_OFFSET, 1.2));
-})();
+  trackGroup.add(buildWallRing(WALL_OFFSET, 1.2));
+}
 
 // --- 轮胎墙 (弯道处, TECPRO后方) ---
-(()=>{
+function buildTireWalls(){
   const tireGeo=new THREE.TorusGeometry(0.35, 0.15, 6, 12);
   const tireMat=new THREE.MeshStandardMaterial({color:0x111114, roughness:0.95});
   const tirePositions=[];
@@ -453,11 +466,11 @@ function isPitGap(x, z){
   mL.count=li; mR.count=ri;
   mL.instanceMatrix.needsUpdate=true; mR.instanceMatrix.needsUpdate=true;
   mL.castShadow=true; mR.castShadow=true;
-  scene.add(mL); scene.add(mR);
-})();
+  trackGroup.add(mL); trackGroup.add(mR);
+}
 
 // --- 高碎片围栏 (3.5m高钢丝网, 围栏上方) ---
-(()=>{
+function buildDebrisFence(){
   const N=NSAMP;
   const postGeo=new THREE.BoxGeometry(0.15, 4.0, 0.15);
   const fenceMat=new THREE.MeshStandardMaterial({color:0x888899, roughness:0.6, metalness:0.4, transparent:true, opacity:0.35, side:THREE.DoubleSide});
@@ -481,8 +494,8 @@ function isPitGap(x, z){
     }
   }
   mPosts.count=pi; mPosts.instanceMatrix.needsUpdate=true; mPosts.castShadow=true;
-  scene.add(mPosts);
-})();
+  trackGroup.add(mPosts);
+}
 
 // ============================================================
 //  观众席 (阶梯式 + 人群纹理 + 屋顶)
@@ -550,13 +563,12 @@ function buildGrandstand(x, z, rotY){
   grp.position.set(x,0,z); grp.rotation.y=rotY;
   return grp;
 }
-// 放置观众席 (更多座, 更大)
-scene.add(buildGrandstand(-300, 370, Math.PI));      // 发车直道外侧 (主看台)
-scene.add(buildGrandstand(188, 270, Math.PI/2));       // T1发夹 (修正: 面东朝鼓包)
-scene.add(buildGrandstand(-15, -185, 0));             // 北侧直道 (不变)
-scene.add(buildGrandstand(-330, 82, 0));              // 西侧直道 (修正: 面北朝T15/T16)
-scene.add(buildGrandstand(100, -140, Math.PI));       // T9附近 (修正: 面北朝减速弯)
-scene.add(buildGrandstand(-120, 160, 0));             // T12附近 (修正: 面北朝T12发夹)
+// 放置观众席 (按赛道配置的坐标列表)
+function buildGrandstands(){
+  for(const [x, z, rotY] of (currentTrack.grandstands || [])){
+    trackGroup.add(buildGrandstand(x, z, rotY));
+  }
+}
 
 // ============================================================
 //  隧道结构 (赛道上方覆盖, 内部灯)
@@ -609,8 +621,10 @@ function buildTunnel(startIdx, endIdx){
   }
   return grp;
 }
-// 隧道放置: Raffles Blvd 长直道段 (采样点 31~35)
-scene.add(buildTunnel(31, 36));
+// 隧道放置 (marina 专属 prop)
+function buildTunnelProp(){
+  trackGroup.add(buildTunnel(31, 36));
+}
 
 // ============================================================
 //  真实 F1 2025 赛季 车队/车手/车号/涂色 (必须在 pit lane 建模之前)
@@ -632,14 +646,11 @@ const TEAMS = [
 const NCARS = TEAMS.length;
 
 // ============================================================
-//  维修区通道 (Pit Lane) — 主直道右侧 (南侧)
-//  布局: 赛道(z=340) → 开放入口 → 内墙段(z=323~328, 有开口) → 通道(z=318) → 外墙(z=313) → 维修站(z=300)
-//  (常量与开口定义已前移至围栏系统之前)
+//  维修区通道 (Pit Lane) — 布局随赛道 pit 配置
 // ============================================================
-const pitGroup = new THREE.Group();
-
 // 维修通道地面 + 入口/出口斜道 + 墙壁 (带开口) + 维修站点
-(()=>{
+function buildPitLane(){
+  const pitGroup = new THREE.Group();
   const pitLen = PIT_EXIT_X - PIT_ENTRY_X; // ~380m
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3a4a, roughness: 0.6, metalness: 0.3 });
 
@@ -824,8 +835,8 @@ const pitGroup = new THREE.Group();
   pitText.rotation.x = -Math.PI / 2;
   pitText.position.set(PIT_ENTRY_X + 20, 0.03, 335);
   pitGroup.add(pitText);
-})();
-scene.add(pitGroup);
+  trackGroup.add(pitGroup);
+}
 
 // 维修区检测: 判断车辆是否在维修通道内 (扩大范围, 包含入口/出口斜道)
 function isInPitLane(pos){
@@ -961,10 +972,9 @@ function buildCity(){
   }
   return grp;
 }
-scene.add(buildCity());
 
-// --- 泛光灯柱 (沿赛道, 夜赛灯光 — 更密更亮) ---
-(()=>{
+// --- 泛光灯柱 (沿赛道, 夜赛灯光) ---
+function buildFloodlights(){
   const poleMat=new THREE.MeshStandardMaterial({color:0x4a4a5a, metalness:0.6, roughness:0.4});
   const lightMat=new THREE.MeshStandardMaterial({color:0xfff8e0, emissive:0xfff8e0, emissiveIntensity:3.0});
   const coneMat=new THREE.MeshBasicMaterial({color:0xfff4cc, transparent:true, opacity:0.06, side:THREE.DoubleSide, depthWrite:false});
@@ -980,36 +990,36 @@ scene.add(buildCity());
         // 灯柱
         const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.3,16,6),poleMat);
         pole.position.set(px,8,pz); pole.castShadow=true;
-        scene.add(pole);
+        trackGroup.add(pole);
         // 灯面板 (更亮)
         const panel=new THREE.Mesh(new THREE.BoxGeometry(3.5,1.8,0.3),lightMat);
         panel.position.set(px,16,pz);
         panel.lookAt(p.x, 0, p.z);
-        scene.add(panel);
+        trackGroup.add(panel);
         // 可见光锥
         const cone=new THREE.Mesh(new THREE.ConeGeometry(7,14,8,1,true),coneMat);
         cone.position.set(px,9,pz);
         cone.lookAt(p.x, -2, p.z);
         cone.rotateX(-Math.PI/2);
-        scene.add(cone);
+        trackGroup.add(cone);
         // 点光源 (更亮更远)
         if(plightCount<MAX_PLIGHTS){
           const pl=new THREE.PointLight(0xfff8e0, 2.0, 180, 1.5);
           pl.position.set(px,15,pz);
-          scene.add(pl);
+          trackGroup.add(pl);
           plightCount++;
         }
       }
     }
   }
-})();
+}
 
 // ============================================================
 //  地标: 新加坡摩天轮 + 金沙酒店三塔
 // ============================================================
 
-// 摩天轮 (Singapore Flyer)
-(()=>{
+// 摩天轮 (Singapore Flyer, marina 专属 prop)
+function buildFlyerProp(){
   const grp=new THREE.Group();
   const structMat=new THREE.MeshStandardMaterial({color:0x333344, metalness:0.5, roughness:0.5});
   const ledMat=new THREE.MeshStandardMaterial({color:0xff4488, emissive:0xff4488, emissiveIntensity:2.0});
@@ -1034,14 +1044,14 @@ scene.add(buildCity());
   led.rotation.x=Math.PI/2; led.position.y=24;
   grp.add(led);
   grp.position.set(250,-330,0);
-  scene.add(grp);
+  trackGroup.add(grp);
   // 缓慢旋转
   grp.userData.spin=()=>{ wheel.rotation.z+=0.002; };
   scene.userData.flyer=grp;
-})();
+}
 
-// 金沙酒店 (Marina Bay Sands 三塔)
-(()=>{
+// 金沙酒店 (Marina Bay Sands 三塔, marina 专属 prop)
+function buildMbsProp(){
   const grp=new THREE.Group();
   const towerMat=new THREE.MeshStandardMaterial({color:0x1a1a2e, metalness:0.3, roughness:0.6, emissive:0x0a0a14, emissiveIntensity:0.3});
   for(let i=0;i<3;i++){
@@ -1061,11 +1071,11 @@ scene.add(buildCity());
   grp.add(skyPark);
   grp.position.set(-150,-180,-400);
   grp.rotation.y=0.3;
-  scene.add(grp);
-})();
+  trackGroup.add(grp);
+}
 
-// --- 水面 (Marina Bay) ---
-(()=>{
+// --- 水面 (Marina Bay, marina 专属 prop) ---
+function buildWaterProp(){
   const water=new THREE.Mesh(
     new THREE.PlaneGeometry(500,350),
     new THREE.MeshStandardMaterial({color:0x1a3a55, metalness:0.9, roughness:0.05, transparent:true, opacity:0.8})
@@ -1073,8 +1083,8 @@ scene.add(buildCity());
   water.rotation.x=-Math.PI/2;
   water.position.set(-100,-0.01,50);
   water.receiveShadow=true;
-  scene.add(water);
-})();
+  trackGroup.add(water);
+}
 
 // ============================================================
 //  F1 赛车 (基本体) — nose 朝 +Z
@@ -1303,7 +1313,7 @@ let totalLaps = 5; // 可由 startRace(config.laps) 修改
 //  维修站 (Pit Building) — 维修通道南侧 (必须在 TEAMS 之后)
 //  布局: 建筑(z=300) → 玻璃幕墙(z=306) → 维修位(z=315) → 通道(z=318) → 内墙(z=323) → 赛道(z=340)
 // ============================================================
-(()=>{
+function buildPitBuilding(){
   const pitGrp=new THREE.Group();
   const wallMat=new THREE.MeshStandardMaterial({color:0x2a2a3e, roughness:0.7, metalness:0.3});
   const glassMat=new THREE.MeshStandardMaterial({color:0x88aacc, transparent:true, opacity:0.4, metalness:0.8, roughness:0.2});
@@ -1441,8 +1451,130 @@ let totalLaps = 5; // 可由 startRace(config.laps) 修改
   canopy.castShadow=true;
   pitGrp.add(canopy);
 
-  scene.add(pitGrp);
-})();
+  trackGroup.add(pitGrp);
+}
+
+// ============================================================
+//  赛道世界构建/销毁 (切赛道的核心)
+// ============================================================
+function buildGround(){
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(8000,8000),
+    new THREE.MeshStandardMaterial({ color: currentTrack.env.ground, roughness:0.85, metalness:0.1 })
+  );
+  ground.rotation.x = -Math.PI/2; ground.position.y = -0.05;
+  ground.receiveShadow = true;
+  trackGroup.add(ground);
+}
+
+// 沙漠景观 (sakhir): 沙丘/岩石/仙人掌
+function buildDesert(){
+  const grp = new THREE.Group();
+  // 远处沙丘 (压扁球体群)
+  const duneMat = new THREE.MeshStandardMaterial({ color:0xd4b47a, roughness:0.95 });
+  for(let i=0;i<40;i++){
+    const ang = Math.random()*Math.PI*2;
+    const dist = 650 + Math.random()*900;
+    const dune = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), duneMat);
+    dune.scale.set(150+Math.random()*250, 15+Math.random()*30, 100+Math.random()*200);
+    dune.position.set(Math.cos(ang)*dist, -2, Math.sin(ang)*dist);
+    grp.add(dune);
+  }
+  // 近处岩石 (多面体, 避开赛道)
+  const rockMat = new THREE.MeshStandardMaterial({ color:0x8a7a5a, roughness:0.9 });
+  for(let i=0;i<NSAMP;i+=40){
+    const p=SAMPLES[i], n=sideNormalAt(i);
+    for(const side of [1,-1]){
+      if(Math.random()<0.5){
+        const dist = HALF_W+18+Math.random()*25;
+        const r = 1+Math.random()*3;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), rockMat);
+        rock.position.set(p.x+n.x*side*dist, r*0.5, p.z+n.z*side*dist);
+        rock.rotation.set(Math.random()*3, Math.random()*3, Math.random()*3);
+        grp.add(rock);
+      }
+    }
+  }
+  // 仙人掌 (稀疏)
+  const cactusMat = new THREE.MeshStandardMaterial({ color:0x3a6a3a, roughness:0.9 });
+  for(let i=10;i<NSAMP;i+=60){
+    const p=SAMPLES[i], n=sideNormalAt(i);
+    const side = Math.random()<0.5?1:-1;
+    const dist = HALF_W+14+Math.random()*15;
+    const h = 2+Math.random()*2.5;
+    const cactus = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.35,h,7), cactusMat);
+    trunk.position.y = h/2; cactus.add(trunk);
+    for(const s of [1,-1]){
+      if(Math.random()<0.7){
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.18,h*0.4,6), cactusMat);
+        arm.position.set(s*0.5, h*0.55, 0);
+        arm.rotation.z = s*0.5;
+        cactus.add(arm);
+      }
+    }
+    cactus.position.set(p.x+n.x*side*dist, 0, p.z+n.z*side*dist);
+    grp.add(cactus);
+  }
+  trackGroup.add(grp);
+}
+
+function buildTrackWorld(trackDef){
+  computeTrackData(trackDef);
+  // pit 参数 (isInPitLane/isPitGap/pitLaneWallCollision 读这些变量)
+  const pit = trackDef.pit;
+  PIT_LANE_Z = pit.laneZ; PIT_LANE_HALF_W = pit.laneHalfW;
+  PIT_ENTRY_X = pit.entryX; PIT_EXIT_X = pit.exitX;
+  PIT_SPEED_LIMIT = pit.speedLimit;
+  PIT_WALL_GAPS = pit.gaps.map(g=>[...g]);
+  // 环境 (光照/天空/雾/车头灯)
+  applyEnv(trackDef.env);
+  // 场景构建
+  buildGround();
+  trackGroup.add(buildRoad());
+  trackGroup.add(buildEdge(1)); trackGroup.add(buildEdge(-1));
+  trackGroup.add(buildCenter());
+  buildStartGrid();
+  buildCornerSigns();
+  buildTecproWall();
+  buildTireWalls();
+  buildDebrisFence();
+  buildGrandstands();
+  buildPitLane();
+  buildPitBuilding();
+  if(trackDef.scenery === 'city'){
+    trackGroup.add(buildCity());
+    buildFloodlights();
+  } else if(trackDef.scenery === 'desert'){
+    buildDesert();
+  }
+  for(const prop of (trackDef.props||[])){
+    if(prop==='tunnel') buildTunnelProp();
+    else if(prop==='flyer') buildFlyerProp();
+    else if(prop==='mbs') buildMbsProp();
+    else if(prop==='water') buildWaterProp();
+  }
+  if(trackGroup.parent !== scene) scene.add(trackGroup);
+}
+
+function disposeTrackWorld(){
+  if(!trackGroup) return;
+  scene.remove(trackGroup);
+  trackGroup.traverse(o=>{
+    if(o.geometry) o.geometry.dispose();
+    if(o.material){
+      for(const m of [].concat(o.material)){
+        if(m.map) m.map.dispose();
+        m.dispose();
+      }
+    }
+  });
+  if(scene.userData.flyer) delete scene.userData.flyer;
+  trackGroup = new THREE.Group();
+}
+
+// 初始构建 (默认赛道)
+buildTrackWorld(currentTrack);
 
 // 车身纹理 (车队名 + 车手号)
 function makeCarTexture(team, isPlayer){
@@ -1518,14 +1650,15 @@ function makeCar(isPlayer, gridSlot){
     mesh.add(arrow);
     marker.userData.arrow=arrow;
   }
-  // 发车位: pit 直道东行, 玩家在中间
-  const gx = -300 + gridSlot*20;
-  const gz = 340 + (gridSlot%2)*4 - 2;
+  // 发车位: 由赛道 grid 配置决定
+  const gd = currentTrack.grid;
+  const gx = gd.x + gridSlot*gd.slotDx;
+  const gz = gd.z + (gridSlot%2)*gd.stagger - gd.stagger/2;
   return {
     mesh, marker, isPlayer, team,
     name:team.driver, num:team.num, teamName:team.name,
     pos:new THREE.Vector3(gx,0,gz),
-    heading:Math.PI/2,
+    heading: gd.heading,
     speed:0,
     velocity:new THREE.Vector3(),
     maxSpeed: isPlayer?82:(difficulty==='easy'?rand(68,74):difficulty==='hard'?rand(74,81):rand(78,86)),
@@ -2898,6 +3031,15 @@ function applyCarLivery(c, cfg){
 //           remotePlayers:[{ id, slot, teamName, short, driver, color, num, maxSpeed, tireType, tireMaxLaps }] }
 function startRace(config){
   config = config || defaultRaceConfig;
+  // 赛道切换: 目标赛道与当前不同则重建赛道世界 (单机选赛道/联机房主选择)
+  if(config.trackId && config.trackId !== currentTrack.id){
+    const def = TRACKS.find(t=>t.id === config.trackId);
+    if(def){
+      disposeTrackWorld();
+      buildTrackWorld(def);
+      calcMiniBounds(); // 小地图边界按新赛道重算
+    }
+  }
   if(config.laps) totalLaps = config.laps;
   if(config.difficulty) difficulty = config.difficulty;
   cars=[]; scene.children.filter(o=>o.userData&&o.userData.isCar).forEach(o=>scene.remove(o));
@@ -2923,6 +3065,8 @@ function startRace(config){
     const c=makeCar(isP,s);
     c.gridSlot=s;
     c.mesh.userData.isCar=true;
+    // 白天赛道关闭车头灯 (applyEnv 设置 __headlightOn)
+    if(c.mesh.userData.headlight) c.mesh.userData.headlight.visible = (window.__headlightOn !== false);
     if(guestMode && !isP) c.isRemote=true; // 客人端: AI 与远程真人一样由网络驱动
     // NPC 分配不重复的 pitBoxIdx
     if(!isP){
@@ -2965,11 +3109,11 @@ function startRace(config){
   ui.lights.style.display='flex';
   ui.lapTotal.textContent=totalLaps;
   ui.posTotal.textContent='/'+cars.length;
-  ui.raceInfo.textContent=TRACK.name+' · '+TRACK.sub+' · '+totalLaps+' LAPS';
+  ui.raceInfo.textContent=currentTrack.name+' · '+currentTrack.sub+' · '+totalLaps+' LAPS';
   camPos.copy(player.pos).add(new THREE.Vector3(-7,2.8,0));
   camera.position.copy(camPos);
   for(const c of cars){ c.lapStartTime=0; }
-  flashMsg('FORMATION', playerCfg.teamName + ' · ' + playerCfg.driver + ' · ' + TRACK.sub);
+  flashMsg('FORMATION', playerCfg.teamName + ' · ' + playerCfg.driver + ' · ' + currentTrack.sub);
 }
 
 function buildLights(){
@@ -3246,11 +3390,12 @@ function rankProgress(c){
 // ============================================================
 const mctx=ui.minimap.getContext('2d');
 let miniBounds=null;
-(function calcMiniBounds(){
+function calcMiniBounds(){
   let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
   for(const s of SAMPLES){ minx=Math.min(minx,s.x);maxx=Math.max(maxx,s.x);minz=Math.min(minz,s.z);maxz=Math.max(maxz,s.z); }
   miniBounds={minx,maxx,minz,maxz};
-})();
+}
+calcMiniBounds();
 function drawMinimap(){
   const W=150,H=150;
   mctx.clearRect(0,0,W,H);

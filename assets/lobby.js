@@ -68,7 +68,7 @@ const serverReady = Net.serverAvailable(1500);
 const MP = window.MP = { active:false, isHost:false, inRace:false, myId:null };
 let myName = 'HOST';
 let players = [];   // {id,name,carIdx,color,tire,ready,slot} — 房主权威
-let settings = { laps:5, difficulty:'normal', aiFill:true };
+let settings = { trackId:'marina-bay', laps:5, difficulty:'normal', aiFill:true };
 let myReady = false;
 const HOST_SLOT = Math.floor(NCARS/2);
 let slotPool = [7,8,9,10,11,0,1,2,3,4,5]; // 客人发车格分配顺序 (host=6)
@@ -120,8 +120,9 @@ function renderPlayers(){
   }
 }
 function renderGuestSettings(){
+  const trackName = (TRACKS.find(t=>t.id===settings.trackId) || TRACKS[0]).name;
   $('guestSettingsView').innerHTML =
-    `赛道: <b style="color:var(--accent)">MARINA BAY · 滨海湾</b><br>`+
+    `赛道: <b style="color:var(--ink)">${trackName}</b><br>`+
     `圈数: <b>${settings.laps}</b> · AI难度: <b>${DIFF_LABEL[settings.difficulty]||settings.difficulty}</b><br>`+
     `AI 补位: <b>${settings.aiFill?'开':'关'}</b>`;
 }
@@ -220,11 +221,19 @@ $('genInviteBtn').addEventListener('click', async ()=>{
 
 // 房主设置变更 → 广播
 function hostSettingsChanged(){
+  settings.trackId = document.querySelector('#lobbyTrackRow .diff-btn.selected').dataset.track;
   settings.laps = parseInt(document.querySelector('#lobbyLapsRow .diff-btn.selected').dataset.laps, 10);
   settings.difficulty = document.querySelector('#lobbyDiffRow .diff-btn.selected').dataset.diff;
   settings.aiFill = $('aiFillChk').checked;
   broadcastLobby();
 }
+$('lobbyTrackRow').querySelectorAll('.diff-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    $('lobbyTrackRow').querySelectorAll('.diff-btn').forEach(b=>b.classList.remove('selected'));
+    btn.classList.add('selected');
+    hostSettingsChanged();
+  });
+});
 $('lobbyLapsRow').querySelectorAll('.diff-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     $('lobbyLapsRow').querySelectorAll('.diff-btn').forEach(b=>b.classList.remove('selected'));
@@ -253,7 +262,7 @@ $('hostStartBtn').addEventListener('click', ()=>{
     laps: settings.laps,
     difficulty: settings.difficulty,
     aiFill: settings.aiFill,
-    trackId: 'marina-bay',
+    trackId: settings.trackId || 'marina-bay',
     lightsOutDelay: 0.7 + Math.random()*1.9, // 各端用同一灭灯延迟, 保证同步起跑
     players: players.map(p=>({ id:p.id, name:p.name, slot:p.slot, ...carConfigOf(p) })),
   };
@@ -448,6 +457,7 @@ function startMpRace(config){
     laps: config.laps,
     difficulty: config.difficulty,
     aiFill: config.aiFill,
+    trackId: config.trackId,   // 双端按同一 trackId 重建赛道
     lightsOutDelay: config.lightsOutDelay,
     playerSlot: me.slot,
     playerConfig: carConfigOf(me),
