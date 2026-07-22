@@ -15,6 +15,7 @@
     --line:rgba(255,255,255,.12);
     --red:#e10600;
     --red-dk:#a80500;
+    --danger:#e10600;
     --purple:#c042ff;
     --green:#3ddc84;
     --yellow:#ffd747;
@@ -62,7 +63,7 @@
   /* ---- 右上: 小地图 ---- */
   #tr{position:absolute;top:14px;right:14px;}
   #miniWrap{background:var(--panel);border:1px solid var(--line);padding:6px;clip-path:var(--cut);}
-  #minimap{display:block;width:140px;height:140px;}
+  #minimap{display:block;width:150px;height:150px;}
   #miniLabel{font-size:8px;color:var(--mut);text-align:center;margin-top:3px;letter-spacing:.18em;}
 
   /* ---- 左侧: 计时段 (F1 三色块) ---- */
@@ -410,7 +411,7 @@
     <!-- 右上: 小地图 -->
     <div id="tr">
       <div id="miniWrap">
-        <canvas id="minimap" width="140" height="140"></canvas>
+        <canvas id="minimap" width="150" height="150"></canvas>
         <div id="miniLabel">TRACK MAP</div>
       </div>
     </div>
@@ -566,6 +567,7 @@
         </div>
         <!-- 确认按钮 -->
         <button class="btn" id="confirmCarBtn" style="margin-top:0;">CONFIRM & RACE</button>
+        <button class="btn ghost" id="garageBackBtn" style="margin-top:8px;">返回</button>
       </div>
     </div>
   </div>
@@ -704,11 +706,37 @@
 </div>
 
 <script>
+window.__errBanners = [];
 window.onerror=function(msg,src,line,col,err){
+  // 过滤无害错误
+  if(msg && (msg.indexOf('ResizeObserver')!==-1 || msg.indexOf('Script error')!==-1)) return false;
+  // 去重: 相同错误不重复显示
+  var key = msg+'|'+src+'|'+line;
+  for(var i=0;i<window.__errBanners.length;i++){
+    if(window.__errBanners[i].key===key) return false;
+  }
+  // 限制数量: 最多3条, 超出移除最旧
+  if(window.__errBanners.length>=3){
+    var old=window.__errBanners.shift();
+    if(old.el&&old.el.parentNode) old.el.parentNode.removeChild(old.el);
+  }
   var d=document.createElement('div');
-  d.style.cssText='position:fixed;top:0;left:0;right:0;background:#f00;color:#fff;padding:10px;z-index:9999;font:14px monospace;white-space:pre-wrap;';
+  d.style.cssText='position:fixed;top:0;left:0;right:0;background:#f00;color:#fff;padding:10px;z-index:9999;font:14px monospace;white-space:pre-wrap;opacity:0.95;';
   d.textContent='JS Error: '+msg+'\nFile: '+src+'\nLine: '+line+'\n'+(err&&err.stack?err.stack:'');
   document.body.appendChild(d);
+  var banner={key:key,el:d};
+  window.__errBanners.push(banner);
+  // 8秒后自动淡出
+  setTimeout(function(){
+    d.style.transition='opacity 1s';
+    d.style.opacity='0';
+    setTimeout(function(){
+      if(d.parentNode) d.parentNode.removeChild(d);
+      var idx=window.__errBanners.indexOf(banner);
+      if(idx>=0) window.__errBanners.splice(idx,1);
+    },1000);
+  },8000);
+  return false;
 };
 </script>
 <!-- Three.js 全局加载 (本地优先, CDN 回退) -->

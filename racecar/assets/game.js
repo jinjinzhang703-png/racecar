@@ -846,14 +846,16 @@ function isInPitLane(pos){
      pos.z > PIT_LANE_Z - PIT_LANE_HALF_W - 8 && pos.z < PIT_LANE_Z + PIT_LANE_HALF_W + 7){
     return true;
   }
-  // 入口斜道范围 (从赛道 z=340 到通道 z=323)
+  // 斜道 z 上限: 赛道边缘 (340-HALF_W=332), 避免覆盖主直道赛车线 z≈340
+  const PIT_APRON_Z = 340 - HALF_W;
+  // 入口斜道范围 (从赛道边缘 z≈332 到通道 z=323)
   if(pos.x > PIT_ENTRY_X - 20 && pos.x < PIT_ENTRY_X + 35 &&
-     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < 342){
+     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < PIT_APRON_Z){
     return true;
   }
   // 出口斜道范围
   if(pos.x > PIT_EXIT_X - 35 && pos.x < PIT_EXIT_X + 20 &&
-     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < 342){
+     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < PIT_APRON_Z){
     return true;
   }
   return false;
@@ -1565,6 +1567,7 @@ function disposeTrackWorld(){
     if(o.material){
       for(const m of [].concat(o.material)){
         if(m.map) m.map.dispose();
+        if(m.emissiveMap && m.emissiveMap !== m.map) m.emissiveMap.dispose();
         m.dispose();
       }
     }
@@ -1664,7 +1667,7 @@ function makeCar(isPlayer, gridSlot){
     heading: gd.heading,
     speed:0,
     velocity:new THREE.Vector3(),
-    maxSpeed: isPlayer?82:(difficulty==='easy'?rand(68,74):difficulty==='hard'?rand(74,81):rand(78,86)),
+    maxSpeed: isPlayer?82:(difficulty==='easy'?rand(68,74):difficulty==='hard'?rand(78,86):rand(74,81)),
     accel: isPlayer?42:50,
     turnRate: isPlayer?2.2:3.0, // F1 手感: 转向速率 2.2 (报告目标值)
     sampleIdx:0, progress:0, lap:0,
@@ -1688,7 +1691,7 @@ function makeCar(isPlayer, gridSlot){
     lastSectorTimes:[null,null,null], lastLapTime:null,
     curSectorStart:0, lapStartTime:0, bestLap:null,
     finished:false, finishTime:0, pits:0,
-    aiTarget:0, aiSkill: difficulty==='easy' ? rand(0.82,0.90) : difficulty==='hard' ? rand(0.95,1.05) : rand(0.94,1.08),
+    aiTarget:0, aiSkill: difficulty==='easy' ? rand(0.82,0.90) : difficulty==='hard' ? rand(0.95,1.08) : rand(0.90,1.02),
     // 走线属性: 0=极端内侧, 1=极端外侧, 影响过弯走线偏好
     racingLineBias: rand(0.15, 0.85),
     // 走线精度: 0=很差(大变量), 1=完美
@@ -1802,6 +1805,8 @@ function barrierCollision(c){
   let hit=false;
   let seg = nearestSegment(c.pos);
   c.sampleIdx = seg.i;
+  // 空中豁免: 起飞高度超过围墙时不再做2D围墙碰撞
+  if(c.y > 1.2) return { seg, hit: false };
 
   // 在维修通道内或正在进站时, 不执行赛道围栏碰撞 (允许车辆驶入维修区)
   if(c.pitting || isInPitLane(c.pos)){
@@ -2029,7 +2034,7 @@ function updatePlayer(dt){
   // DRS (降阻提速)
   c.drsActive=false;
   if(c.drsAvailable && input.drs && !input.brake && c.speed>40){ c.drsActive=true; }
-  const drsBoost = c.drsActive?9:0;
+  let drsBoost = c.drsActive?9:0;
   // 尾流
   let tow=0;
   for(const o of cars){ if(o===c)continue;
@@ -2043,13 +2048,17 @@ function updatePlayer(dt){
   }
   // 倒车逻辑 (仅玩家, 比赛中): 接近静止时按住刹车 0.4秒切换倒车模式
   // 罚停/进站动画期间禁用倒车
+  // 使用真实时间累积, 防止低 fps 下 dt clamp 导致计时器变慢
+  const nowMs = performance.now();
+  const realDt = c._lastRevTime ? Math.min(0.1, (nowMs - c._lastRevTime) / 1000) : dt;
+  c._lastRevTime = nowMs;
   if(c.holdTimer > 0 || c.pitTimer > 0){
     c.inReverse = false;
     c.reverseTimer = 0;
   } else if(c.isPlayer && !c.isAI && race.phase==='racing'){
     // 进入倒车模式: 车辆接近静止 + 持续按刹车
     if(Math.abs(c.speed) < 3 && input.brake && !input.acc){
-      c.reverseTimer = (c.reverseTimer||0) + dt;
+      c.reverseTimer = (c.reverseTimer||0) + realDt;
       if(c.reverseTimer > 0.4 && !c.inReverse){
         c.inReverse = true;
         flashMsg('REVERSE','倒车模式');
@@ -2971,10 +2980,16 @@ function getSelectedPlayerConfig(){
 // 默认比赛配置 (lobby.js 设置, 车库确认后直接开赛时使用)
 let defaultRaceConfig = {};
 function setDefaultRaceConfig(cfg){ defaultRaceConfig = cfg || {}; }
-function openGarage(){
+// 车库来源: 'menu' | 'lobby'
+let garageSource = 'menu';
+function openGarage(source){
+  garageSource = source || 'menu';
   buildGarageUI();
   $('startScreen').classList.add('hidden');
   $('garageScreen').classList.remove('hidden');
+  // 根据来源调整按钮文案
+  const confirmBtn = $('confirmCarBtn');
+  if(confirmBtn) confirmBtn.textContent = garageSource === 'lobby' ? 'CONFIRM' : 'CONFIRM & RACE';
 }
 function closeGarage(){
   $('garageScreen').classList.add('hidden');
@@ -2982,6 +2997,15 @@ function closeGarage(){
   if(window.onGarageConfirm){ const h=window.onGarageConfirm; window.onGarageConfirm=null; h(); return; }
   startRace(defaultRaceConfig);
 }
+// 车库返回按钮: 按来源返回上一屏
+$('garageBackBtn').addEventListener('click', ()=>{
+  $('garageScreen').classList.add('hidden');
+  if(garageSource === 'lobby'){
+    $('lobbyScreen').classList.remove('hidden');
+  } else {
+    showScreen('trackScreen');
+  }
+});
 
 // 难度选择器 (仅主菜单, 大厅内有独立的难度控件)
 document.querySelectorAll('#startScreen .diff-btn').forEach(btn=>{
@@ -3123,8 +3147,8 @@ function startRace(config){
     cars.push(c);
   }
   raceClock=0; race.phase='grid'; race.lights=0; race.lightTimer=0;
-  // 联机: 房主指定的灭灯延迟, 各端一致才能同步起跑; 单机为 null (随机)
-  race.lightsOutDelay = (config.lightsOutDelay != null) ? config.lightsOutDelay : null;
+  // 联机: 房主指定的灭灯延迟, 各端一致才能同步起跑; 单机进入 grid 时采样一次固定
+  race.lightsOutDelay = (config.lightsOutDelay != null) ? config.lightsOutDelay : rand(0.7, 2.6);
   // 重置全局状态 (防止跨比赛残留)
   maxKph=0;
   if(typeof pitGame !== 'undefined'){
@@ -3172,7 +3196,7 @@ function updateRace(dt){
       player.jumpStart=true;
       flashMsg('JUMP START','起步后将罚停 2.5s');
     }
-    if(race.lights>=5 && race.lightTimer>(race.lightsOutDelay!=null ? race.lightsOutDelay : rand(0.7,2.6))){
+    if(race.lights>=5 && race.lightTimer > race.lightsOutDelay){
       lightsOut();
       race.phase='racing';
       raceClock=0;
@@ -3251,9 +3275,9 @@ function updateGapDisplay(){
   if(myIdx>0){
     const ahead=ranked[myIdx-1];
     const gap=rankProgress(ahead)-rankProgress(player);
-    // 转换为时间 (用最低速度 20 m/s 防止除零)
+    // 转换为时间: progress差/1000 * 一圈参考90s * (60/参考速度) 速度修正
     const refSpeed=Math.max(Math.abs(player.speed), 20);
-    const gapTime=Math.max(0.1, gap/1000*90/refSpeed);
+    const gapTime=Math.max(0.1, gap/1000 * 90 * (60/refSpeed));
     ui.gapAheadVal.textContent='+'+gapTime.toFixed(1)+'s';
     // 判断是否在追赶 (gap在缩小)
     const prevGap=player._prevGapAhead ?? gap;
@@ -3270,7 +3294,7 @@ function updateGapDisplay(){
     const behind=ranked[myIdx+1];
     const gap=rankProgress(player)-rankProgress(behind);
     const refSpeed2=Math.max(Math.abs(player.speed), 20);
-    const gapTime=Math.max(0.1, gap/1000*90/refSpeed2);
+    const gapTime=Math.max(0.1, gap/1000 * 90 * (60/refSpeed2));
     ui.gapBehindVal.textContent='+'+gapTime.toFixed(1)+'s';
     const prevGap=player._prevGapBehind ?? gap;
     if(gap>prevGap) ui.gapBehindVal.className='slow'; // 差距在拉大=安全
@@ -3469,7 +3493,14 @@ addEventListener('keydown',e=>{
   if(k==='ShiftLeft'||k==='ShiftRight') input.ers=true;
   if(k==='KeyE') input.drs=true;
   if(k==='KeyC'){ toggleCam(); }
-  if(k==='KeyP'){ if(race.phase==='racing'){race.phase='paused';ui.pauseScreen.classList.remove('hidden');} else if(race.phase==='paused'){race.phase='racing';ui.pauseScreen.classList.add('hidden');} }
+  if(k==='KeyP'){
+    if(window.MP && window.MP.inRace){
+      flashMsg('NO PAUSE','联机比赛不会等待');
+      return;
+    }
+    if(race.phase==='racing'){race.phase='paused';ui.pauseScreen.classList.remove('hidden');}
+    else if(race.phase==='paused'){race.phase='racing';ui.pauseScreen.classList.add('hidden');}
+  }
   if(k==='KeyQ' && race.phase==='racing' && player.pitTimer<=0 && !pitGame.active) tryPit();
   // 换胎小游戏按键处理: ESC 取消, 字母键作答
   if(pitGame.active && k==='Escape'){ cancelPitStop(); return; }
@@ -3683,6 +3714,7 @@ function resetCarToTrack(c){
   const p = curve.getPointAt(t);
   const tangent = curve.getTangentAt(t);
   c.pos.copy(p); c.pos.y=0;
+  c.y = 0; // 离地高度同步清零, 防止与 pos.y 不一致
   c.heading = Math.atan2(tangent.x, tangent.z);
   c.velocity.set(0,0,0);
   c.speed=0;
@@ -3698,7 +3730,11 @@ function resetCarToTrack(c){
 
 // 重置玩家到赛道中心 (R键)
 function resetPlayerToTrack(){
-  resetCarToTrack(player);
+  const c = player;
+  resetCarToTrack(c);
+  // 清零全部 3D 姿态, 防止翻车/空中状态残留导致二次救援
+  c.y = 0; c.vy = 0; c.roll = 0; c.rollV = 0; c.pitch3d = 0; c.pitchV = 0;
+  c.airborne = false; c.flipped = false; c.flipTimer = 0;
   flashMsg('RESET','车辆已重置 · 罚时3秒');
 }
 
@@ -4118,6 +4154,12 @@ document.addEventListener('visibilitychange',()=>{
   if(document.hidden && race.phase==='racing'){
     race.phase='paused'; ui.pauseScreen.classList.remove('hidden');
   }
+  // 页面隐藏时立即静音, 防止 rAF 停转后引擎声持续
+  if(document.hidden && audioInitialized){
+    if(engGain) engGain.gain.value = 0;
+    if(windGain) windGain.gain.value = 0;
+    if(tireGain) tireGain.gain.value = 0;
+  }
 });
 
 // ---------- 联机: 远程车辆插值 ----------
@@ -4164,8 +4206,8 @@ function loop(){
     updatePlayer(dt);
     for(const c of cars){
       if(c.isPlayer) continue;
-      integrate3D(c, dt);    // AI/远程车同样积分 3D 姿态
-      if(c.isRemote){ updateRemoteCar(c); continue; } // 联机: 网络驱动的车不跑AI
+      if(c.isRemote){ updateRemoteCar(c); continue; } // 联机: 网络驱动的车不跑AI, 姿态完全由网络同步
+      integrate3D(c, dt);    // AI 积分 3D 姿态
       try{ updateAI(c,dt); }
       catch(e){ console.warn('AI error:', e); }
     }

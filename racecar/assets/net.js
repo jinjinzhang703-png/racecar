@@ -15,9 +15,10 @@ const Net = (function(){
   let pc = null, dc = null;
   // 房主端: 已接入的客人 guestId -> { pc, dc }
   const guests = new Map();
-  // 房主端: 等待应答码的槽位 [{ slot, pc, dc, guestId }]
+  // 房主端: 等待应答码的槽位 [{ slot, pc, dc, guestId }] — slot 为自增唯一 ID
   const pendings = [];
   let nextGuestNum = 1;
+  let nextSlotId = 1;
 
   const msgHandlers = [];       // fn(fromId, obj)  fromId='host' 表示来自房主
   const peerHandlers = [];      // fn(guestId, 'join'|'leave') 仅房主端触发
@@ -55,11 +56,11 @@ const Net = (function(){
   //  房主端
   // ============================================================
 
-  // 生成一个邀请码槽位, 返回 { slot, code }
+  // 生成一个邀请码槽位, 返回 { slot, code } — slot 为自增唯一 ID, 不受数组下标变化影响
   async function createInvite(){
     const conn = newPC();
     const channel = conn.createDataChannel('game', { ordered: true });
-    const pending = { slot: pendings.length, pc: conn, dc: channel, guestId: null, timeoutId: null };
+    const pending = { slot: nextSlotId++, pc: conn, dc: channel, guestId: null, timeoutId: null };
     pendings.push(pending);
 
     // 超时清理: 90s 未接入则关闭并移除
@@ -89,9 +90,9 @@ const Net = (function(){
     return { slot: pending.slot, code: encode(conn.localDescription) };
   }
 
-  // 粘贴客人的应答码, 完成握手
+  // 粘贴客人的应答码, 完成握手 (slot 为唯一 ID, 非数组下标)
   async function acceptAnswer(slot, code){
-    const pending = pendings[slot];
+    const pending = pendings.find(p=>p.slot === slot);
     if(!pending) throw new Error('无效的邀请槽位');
     await pending.pc.setRemoteDescription(decode(code));
     // 连接结果通过 channel.onopen / ICE 失败体现

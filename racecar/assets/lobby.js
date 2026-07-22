@@ -57,7 +57,7 @@ $('lapsRow').querySelectorAll('.diff-btn').forEach(btn=>{
 $('toGarageBtn').addEventListener('click', ()=>{
   setDefaultRaceConfig({ laps: selLaps, trackId: selTrackId });
   showScreen(null);
-  openGarage();
+  openGarage('menu');
 });
 
 // ============================================================
@@ -168,6 +168,15 @@ $('hostBtn').addEventListener('click', async ()=>{
       MP.active = true; MP.isHost = true; myName = 'HOST';
       setupNet();
       const role = await Net.connectServer(wsUrl(), 'host');
+      if(!role.isHost){
+        // 已有房主: 作为客人加入, 防止幽灵房主
+        MP.isHost = false;
+        myName = 'PLAYER' + Math.floor(Math.random()*1000);
+        players = [{ id:'host', name:'HOST', carIdx:0, color:GARAGE_CARS[0].color, tire:'soft', ready:true, slot:HOST_SLOT }];
+        showLobby();
+        lobbyStatus('已有房主在线, 已作为客人加入');
+        return;
+      }
       MP.myId = role.id;
       const sel = myCarSel();
       players = [{ id:MP.myId, name:myName, ...sel, ready:true, slot:HOST_SLOT }];
@@ -359,7 +368,7 @@ $('lobbyGarageBtn').addEventListener('click', ()=>{
     $('lobbyScreen').classList.remove('hidden');
     sendMyUpdate();
   };
-  openGarage();
+  openGarage('lobby');
 });
 
 // 离开大厅: 清理连接后返回主菜单 (软重置, 避免刷新页面)
@@ -383,7 +392,11 @@ function setupNet(){
   Net.onPeer((gid, ev)=>{
     if(!MP.active) return;
     if(!MP.isHost){
-      if(ev==='leave' && MP.inRace){ /* 与房主断线 */ flashMsg('DISCONNECTED','与房主失去连接'); }
+      if(ev==='leave'){
+        flashMsg('DISCONNECTED','与房主失去连接');
+        // 非比赛状态也自动返回主菜单, 防止死大厅
+        if(!MP.inRace) setTimeout(()=>backToMenu(), 1500);
+      }
       return;
     }
     if(ev==='leave'){
@@ -588,11 +601,19 @@ function maybeSendResults(){
   const humans = players.map(p=>p.id);
   if(!humans.every(id=>humanFinishes.has(id))) return;
   const ranked = [...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
-  const order = ranked.map((c,i)=>({
-    pos:i+1,
-    name: c.isPlayer ? '你' : (c._mpName || c.name),
-    time: c.finished && c.finishTime < 1e6 ? c.finishTime : null,
-  }));
+  const order = ranked.map((c,i)=>{
+    let time = null;
+    if(c._netKey && humanFinishes.has(c._netKey)){
+      time = humanFinishes.get(c._netKey); // 远程真人: 完赛为时间, DNF为null
+    } else if(c.finished && c.finishTime < 1e6){
+      time = c.finishTime; // 本地玩家或AI
+    }
+    return {
+      pos:i+1,
+      name: c.isPlayer ? '你' : (c._mpName || c.name),
+      time,
+    };
+  });
   Net.broadcast({ t:'results', order });
   showResults(order);
 }
