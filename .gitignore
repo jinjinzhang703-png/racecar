@@ -1,0 +1,32 @@
+# Chrome test profiles and caches
+tests/.chrome-*/
+tests/.chrome-profile*/
+tests/.chrome-feat/
+tests/.chrome-phys/
+tests/.chrome-pl/
+tests/.chrome-flip/
+tests/.chrome-t20/
+tests/.chrome-t21/
+tests/.chrome-t22/
+tests/.chrome-t23/
+tests/.chrome-t24/
+tests/.chrome-t25/
+tests/.chrome-t26/
+tests/.chrome-t27/
+tests/.chrome-t28/
+tests/.chrome-t29/
+tests/.chrome-t30/
+tests/shots/
+
+# Node
+node_modules/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
