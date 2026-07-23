@@ -3346,9 +3346,10 @@ function updateWarnings(){
     // 检查前方弯道曲率 (sampleIdx 非法时跳过, 防止 TANGENTS[NaN] 崩溃)
     const baseIdx = (((c.sampleIdx|0) % NSAMP) + NSAMP) % NSAMP;
     const lookAhead=Math.min(30, Math.floor(Math.abs(c.speed)*0.8));
-    const ahead=TANGENTS[(baseIdx+lookAhead)%NSAMP];
+    const aheadIdx = (((baseIdx+lookAhead|0) % NSAMP) + NSAMP) % NSAMP;
+    const ahead=TANGENTS[aheadIdx];
     const cur=TANGENTS[baseIdx];
-    if(!ahead || !cur){
+    if(!ahead || !cur || !isFinite(ahead.x) || !isFinite(ahead.z) || !isFinite(cur.x) || !isFinite(cur.z)){
       ui.speedo.classList.remove('speedWarn');
     } else {
       const curveDot=ahead.x*cur.x+ahead.z*cur.z;
@@ -3928,6 +3929,7 @@ function updateTireSound(slipAmount){
   if(!audioInitialized || !audioCtx || !tireGain || !tireFilter) return;
   if(!isFinite(slipAmount)) slipAmount=0; // NaN 防护
   const t=audioCtx.currentTime;
+  if(!isFinite(t)) return;
   const vol=Math.max(0, Math.min(0.12, slipAmount*0.2));
   tireGain.gain.linearRampToValueAtTime(isFinite(vol) ? vol : 0, t+0.05);
   // 啸叫频率随滑移量升高 (900Hz → 1600Hz)
@@ -3941,6 +3943,7 @@ function updateEngineSound(){
   if(!engGain || !engOsc1 || !engOsc2 || !engSub || !engFilter || !windGain || !windFilter || !tireGain) return;
   if(audioCtx.state === 'suspended'){ audioCtx.resume(); return; }
   const t=audioCtx.currentTime;
+  if(!isFinite(t)) return;
   // 暂停/菜单时全部静音
   if(race.phase!=='racing' && race.phase!=='grid'){
     engGain.gain.linearRampToValueAtTime(0, t+0.1);
@@ -3970,7 +3973,8 @@ function updateEngineSound(){
   const spd=isFinite(c.speed)?Math.abs(c.speed):0;
   const wvol=Math.min(0.10, (spd/82)*(spd/82)*0.10);
   windGain.gain.linearRampToValueAtTime(isFinite(wvol) ? wvol : 0, t+0.1);
-  windFilter.frequency.linearRampToValueAtTime(400+spd*6, t+0.1);
+  const windFreq = isFinite(400+spd*6) ? Math.max(200, Math.min(8000, 400+spd*6)) : 400;
+  windFilter.frequency.linearRampToValueAtTime(windFreq, t+0.1);
   // 收油爆震: 高转速松油门随机放炮
   crackleTimer-=1/60;
   if(!input.acc && rpm>9000 && crackleTimer<=0){
