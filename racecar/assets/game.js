@@ -651,7 +651,8 @@ const NCARS = TEAMS.length;
 // 维修通道地面 + 入口/出口斜道 + 墙壁 (带开口) + 维修站点
 function buildPitLane(){
   const pitGroup = new THREE.Group();
-  const pitLen = PIT_EXIT_X - PIT_ENTRY_X; // ~380m
+  const pitLen = Math.abs(PIT_EXIT_X - PIT_ENTRY_X); // ~380m
+  const pitDir = Math.sign(PIT_EXIT_X - PIT_ENTRY_X) || 1;
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3a4a, roughness: 0.6, metalness: 0.3 });
 
   // 维修通道地面
@@ -718,7 +719,7 @@ function buildPitLane(){
   const teamColors = TEAMS.map(t => t.color);
   const pitBoxSpacing = pitLen / (NCARS + 2);
   for(let i = 0; i < NCARS; i++){
-    const bx = PIT_ENTRY_X + pitBoxSpacing * (i + 1.5);
+    const bx = PIT_ENTRY_X + pitDir * pitBoxSpacing * (i + 1.5);
     // 维修位地面标记
     const boxMark = new THREE.Mesh(
       new THREE.PlaneGeometry(4, 3),
@@ -2250,21 +2251,23 @@ function updateAI(c, dt){
       c.recoveryMode = true; c.recoveryTimer = 1.0;
       return; // 超时取消, 直接返回
     }
-    const pitLen = PIT_EXIT_X - PIT_ENTRY_X;
+    const pitLen = Math.abs(PIT_EXIT_X - PIT_ENTRY_X);
     const pitBoxSpacing = pitLen / 12;
-    const boxX = PIT_ENTRY_X + pitBoxSpacing * (c.pitBoxIdx + 1.5);
+    const pitDir = Math.sign(PIT_EXIT_X - PIT_ENTRY_X) || 1;
+    const boxX = PIT_ENTRY_X + pitDir * pitBoxSpacing * (c.pitBoxIdx + 1.5);
 
     if(c.pitPhase === 'entering'){
       // 阶段1: 沿主赛道驶向维修通道入口 (两阶段导航, 防止斜插穿墙/掉头逆行)
       // 错过入口 (已驶过窗口): 放弃本次进站, 下圈再决策
-      if(c.pos.x > PIT_ENTRY_X + 40){
+      // pitDir=1: 向东行驶, x > entryX+40 错过; pitDir=-1: 向西行驶, x < entryX-40 错过
+      if(c.pos.x * pitDir > (PIT_ENTRY_X + 40 * pitDir) * pitDir){
         c.pitting = false; c.pitPhase = null; c._pitEntryTimer = 0;
         return;
       }
-      const inWindow = c.pos.x < PIT_ENTRY_X + 35;
+      const inWindow = pitDir > 0 ? (c.pos.x < PIT_ENTRY_X + 35) : (c.pos.x > PIT_ENTRY_X - 35);
       const entryTarget = inWindow
-        ? new THREE.Vector3(PIT_ENTRY_X + 20, 0, PIT_LANE_Z) // 窗口内: 向北驶入通道
-        : new THREE.Vector3(PIT_ENTRY_X + 20, 0, 340);        // 未到: 沿赛道驶向窗口
+        ? new THREE.Vector3(PIT_ENTRY_X + 20 * pitDir, 0, PIT_LANE_Z) // 窗口内: 驶入通道
+        : new THREE.Vector3(PIT_ENTRY_X + 20 * pitDir, 0, 340);        // 未到: 沿赛道驶向窗口
       const dx = entryTarget.x - c.pos.x;
       const dz = entryTarget.z - c.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -2316,7 +2319,7 @@ function updateAI(c, dt){
       }
     } else if(c.pitPhase === 'exiting'){
       // 阶段4: 从维修通道驶出, 回到主赛道 (目标设在赛道中心 z=340)
-      const exitTarget = new THREE.Vector3(PIT_EXIT_X + 10, 0, 340);
+      const exitTarget = new THREE.Vector3(PIT_EXIT_X + 10 * pitDir, 0, 340);
       const dx = exitTarget.x - c.pos.x;
       const dz = exitTarget.z - c.pos.z;
       const dist = Math.hypot(dx, dz);
