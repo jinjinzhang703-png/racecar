@@ -102,7 +102,8 @@ try{
     race.phase='racing';
     const ai = cars.find(c=>!c.isPlayer);
     ai.tire = 15; ai.lap = 1; ai.pits = 0; ai.pitStopDuration = 2.0;
-    ai.pos.set(-372, 0, 338); ai.heading = Math.PI/2; ai.speed = 40; ai.velocity.set(40,0,0); ai.progress=0.97;
+    // 使用当前 pit 参数动态计算位置 (支持赛道缩放)
+    ai.pos.set(PIT_ENTRY_X + 30, 0, PIT_LANE_Z + 20); ai.heading = Math.PI/2; ai.speed = 40; ai.velocity.set(40,0,0); ai.progress=0.97;
     window.__ai = ai; return true;
   })()`);
   await waitFor(`__ai.pitting===true`, 30000, 'AI决定进站');

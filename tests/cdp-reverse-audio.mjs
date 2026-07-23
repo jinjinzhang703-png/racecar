@@ -70,8 +70,10 @@ try{
   await waitFor(`race.phase==='grid'`);
 
   console.log('[1] 倒车逻辑');
-  // 直接进 racing, 停车
-  await evalJs(`race.phase='racing'; player.speed=0; player.velocity.set(0,0,0); input.acc=false; input.brake=false; 'ok'`);
+  // 直接进 racing, 停车 (将 AI 车移到远处, 防止干扰倒车测试)
+  await evalJs(`race.phase='racing'; player.speed=0; player.velocity.set(0,0,0); input.acc=false; input.brake=false;
+    for(const c of cars){ if(!c.isPlayer){ c.pos.set(9999, 0, 9999); c.speed=0; c.velocity.set(0,0,0); } }
+    'ok'`);
   await sleep(300);
 
   // Bug复现场景: 多次点刹不应累积进入倒车

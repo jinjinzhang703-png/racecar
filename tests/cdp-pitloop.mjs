@@ -61,7 +61,8 @@ function check(name, ok, extra=''){
 }
 async function putInLane(tire){
   await evalJs(`(()=>{
-    player.pos.set(-320, 0, 318); player.heading = Math.PI/2;
+    // 使用当前 pit 参数动态计算位置 (支持赛道缩放)
+    player.pos.set(PIT_ENTRY_X + 40, 0, PIT_LANE_Z); player.heading = Math.PI/2;
     player.speed = 0; player.velocity.set(0,0,0);
     player.tire = ${tire}; player.pitTimer = 0; player.inReverse = false;
     pitGame.active = false; player._pitServedThisEntry = false;

@@ -110,7 +110,8 @@ const CURVATURE = [];
 
 function computeTrackData(trackDef){
   currentTrack = trackDef;
-  WP = trackDef.wp;
+  const scale = trackDef.scale || 1.0;
+  WP = trackDef.wp.map(p=>[p[0]*scale, p[1]*scale]);
   CORNER_NAMES = trackDef.cornerNames;
   N_WP = WP.length;
   S1_END = trackDef.sectorEnds[0]/N_WP;
@@ -118,8 +119,8 @@ function computeTrackData(trackDef){
   DRS_ZONES = trackDef.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
   PIT_ZONE = trackDef.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
 
-  // 构建闭合曲线
-  waypoints = WP.map(p=>new THREE.Vector3(p[0],0,p[1]));
+  // 构建闭合曲线 (支持海拔: elevations[i] 为 waypoint i 的 y 坐标)
+  waypoints = WP.map((p,i)=>new THREE.Vector3(p[0], (trackDef.elevations?.[i]||0)*scale, p[1]));
   curve = new THREE.CatmullRomCurve3(waypoints, true, 'centripetal', 0.5);
 
   // 稠密采样点
@@ -216,7 +217,7 @@ function buildRoad(){
     const p=SAMPLES[i], n=sideNormalAt(i);
     const L=p.clone().addScaledVector(n, HALF_W);
     const R=p.clone().addScaledVector(n,-HALF_W);
-    pos.push(L.x,0.02,L.z, R.x,0.02,R.z);
+    pos.push(L.x, L.y+0.02, L.z, R.x, R.y+0.02, R.z);
     uv.push(0, i/30, 1, i/30);
   }
   for(let i=0;i<NSAMP;i++){
@@ -245,7 +246,7 @@ function buildEdge(side){
     const p=SAMPLES[i], n=sideNormalAt(i);
     const inner=p.clone().addScaledVector(n, side*HALF_W);
     const outer=p.clone().addScaledVector(n, side*(HALF_W+0.6));
-    pos.push(inner.x,0.05,inner.z, outer.x,0.05,outer.z);
+    pos.push(inner.x,inner.y+0.05,inner.z, outer.x,outer.y+0.05,outer.z);
   }
   for(let i=0;i<NSAMP;i++){const a=i*2,b=a+1,c=((i+1)%NSAMP)*2,d=c+1; idx.push(a,b,d,a,d,c);}
   const g=new THREE.BufferGeometry();
@@ -262,7 +263,7 @@ function buildCenter(){
     const p=SAMPLES[i];
     const ry=Math.atan2(TANGENTS[i].x, TANGENTS[i].z);
     const m=new THREE.Mesh(new THREE.BoxGeometry(0.25,0.04,2.0),mat);
-    m.position.set(p.x,0.04,p.z);
+    m.position.set(p.x,p.y+0.04,p.z);
     m.rotation.y=ry;
     grp.add(m);
   }
@@ -365,7 +366,7 @@ function buildStartGrid(){
   const p=SAMPLES[0];
   const tex=new THREE.CanvasTexture(makeChecker());
   const m=new THREE.Mesh(new THREE.PlaneGeometry(HALF_W*2,3),new THREE.MeshStandardMaterial({map:tex,roughness:0.7}));
-  m.rotation.x=-Math.PI/2; m.position.set(p.x,0.06,p.z);
+  m.rotation.x=-Math.PI/2; m.position.set(p.x,p.y+0.06,p.z);
   m.rotation.z = Math.atan2(TANGENTS[0].x, TANGENTS[0].z);
   trackGroup.add(m);
 }
@@ -565,8 +566,9 @@ function buildGrandstand(x, z, rotY){
 }
 // 放置观众席 (按赛道配置的坐标列表)
 function buildGrandstands(){
+  const scale = currentTrack.scale || 1.0;
   for(const [x, z, rotY] of (currentTrack.grandstands || [])){
-    trackGroup.add(buildGrandstand(x, z, rotY));
+    trackGroup.add(buildGrandstand(x*scale, z*scale, rotY));
   }
 }
 
@@ -840,22 +842,26 @@ function buildPitLane(){
 }
 
 // 维修区检测: 判断车辆是否在维修通道内 (扩大范围, 包含入口/出口斜道)
+// 支持双向 pit lane (pitDir=1 或 -1), x 范围自动取 min/max
 function isInPitLane(pos){
+  const pitMinX = Math.min(PIT_ENTRY_X, PIT_EXIT_X);
+  const pitMaxX = Math.max(PIT_ENTRY_X, PIT_EXIT_X);
   // 维修通道主体范围 (z 向外扩展, 覆盖侧壁碰撞缓冲区,
   // 防止车辆以微小穿透冲出通道落入赛道中心线碰撞)
-  if(pos.x > PIT_ENTRY_X - 15 && pos.x < PIT_EXIT_X + 15 &&
+  if(pos.x > pitMinX - 15 && pos.x < pitMaxX + 15 &&
      pos.z > PIT_LANE_Z - PIT_LANE_HALF_W - 8 && pos.z < PIT_LANE_Z + PIT_LANE_HALF_W + 7){
     return true;
   }
   // 斜道 z 上限: 赛道边缘 (340-HALF_W=332), 避免覆盖主直道赛车线 z≈340
   const PIT_APRON_Z = 340 - HALF_W;
+  const pitDir = Math.sign(PIT_EXIT_X - PIT_ENTRY_X) || 1;
   // 入口斜道范围 (从赛道边缘 z≈332 到通道 z=323)
-  if(pos.x > PIT_ENTRY_X - 20 && pos.x < PIT_ENTRY_X + 35 &&
+  if(pos.x > PIT_ENTRY_X - (pitDir>0?20:35) && pos.x < PIT_ENTRY_X + (pitDir>0?35:20) &&
      pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < PIT_APRON_Z){
     return true;
   }
   // 出口斜道范围
-  if(pos.x > PIT_EXIT_X - 35 && pos.x < PIT_EXIT_X + 20 &&
+  if(pos.x > PIT_EXIT_X - (pitDir>0?35:20) && pos.x < PIT_EXIT_X + (pitDir>0?20:35) &&
      pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < PIT_APRON_Z){
     return true;
   }
@@ -1524,12 +1530,13 @@ function buildDesert(){
 
 function buildTrackWorld(trackDef){
   computeTrackData(trackDef);
+  const scale = trackDef.scale || 1.0;
   // pit 参数 (isInPitLane/isPitGap/pitLaneWallCollision 读这些变量)
   const pit = trackDef.pit;
-  PIT_LANE_Z = pit.laneZ; PIT_LANE_HALF_W = pit.laneHalfW;
-  PIT_ENTRY_X = pit.entryX; PIT_EXIT_X = pit.exitX;
+  PIT_LANE_Z = pit.laneZ * scale; PIT_LANE_HALF_W = pit.laneHalfW;
+  PIT_ENTRY_X = pit.entryX * scale; PIT_EXIT_X = pit.exitX * scale;
   PIT_SPEED_LIMIT = pit.speedLimit;
-  PIT_WALL_GAPS = pit.gaps.map(g=>[...g]);
+  PIT_WALL_GAPS = pit.gaps.map(g=>[g[0]*scale, g[1]*scale]);
   // 环境 (光照/天空/雾/车头灯)
   applyEnv(trackDef.env);
   // 场景构建
@@ -1659,8 +1666,9 @@ function makeCar(isPlayer, gridSlot){
   }
   // 发车位: 由赛道 grid 配置决定
   const gd = currentTrack.grid;
-  const gx = gd.x + gridSlot*gd.slotDx;
-  const gz = gd.z + (gridSlot%2)*gd.stagger - gd.stagger/2;
+  const gscale = currentTrack.scale || 1.0;
+  const gx = gd.x * gscale + gridSlot*gd.slotDx;
+  const gz = gd.z * gscale + (gridSlot%2)*gd.stagger - gd.stagger/2;
   return {
     mesh, marker, isPlayer, team,
     name:team.driver, num:team.num, teamName:team.name,
@@ -2195,7 +2203,7 @@ function updateAI(c, dt){
   if(!c.pos || isNaN(c.pos.x) || isNaN(c.pos.z)){
     // 位置无效, 重置到赛道
     const rp=racingLinePoint(c.sampleIdx||0);
-    c.pos.copy(rp); c.pos.y=0.6;
+    c.pos.copy(rp); // rp 已包含赛道海拔
     c.speed=0; c.velocity.set(0,0,0);
   }
 
@@ -2218,7 +2226,7 @@ function updateAI(c, dt){
     // NaN保护
     if(isNaN(c.pos.x)||isNaN(c.pos.z)){
       const rp=racingLinePoint(c.sampleIdx||0);
-      c.pos.copy(rp); c.pos.y=0.6;
+      c.pos.copy(rp); // rp 已包含赛道海拔
       c.speed=0; c.velocity.set(0,0,0);
       c.collisionLock = 0;
     }
@@ -2608,6 +2616,10 @@ function applyMesh(c){
   c.mesh.position.copy(c.pos);
   c.mesh.rotation.y=c.heading;
 
+  // 赛道海拔贴合: 查询最近采样点的 y 坐标, 车辆始终贴合赛道表面
+  const near = nearestSample(c.pos);
+  const trackY = SAMPLES[near.idx].y || 0;
+
   // === 悬挂/重量转移 (纯视觉, 弹簧-阻尼模型; 真实F1悬挂硬, 幅度克制) ===
   const sus=c._sus||(c._sus={pitch:0,pitchV:0,roll:0,rollV:0,y:0,yV:0,prevSpeed:c.speed||0,prevH:c.heading,phase:Math.random()*7});
   const dtS=1/60;
@@ -2633,7 +2645,8 @@ function applyMesh(c){
   const roadNoise=Math.sin(sus.phase)*0.012*Math.min(1,spd/40);
   sus.yV += (-sus.y*80 - sus.yV*12)*dtS;
   sus.y += sus.yV*dtS;
-  c.mesh.position.y = (c.y||0) + Math.max(-0.06, sus.y + roadNoise);
+  // mesh y = 赛道海拔 + 离地高度 + 悬挂偏移
+  c.mesh.position.y = trackY + (c.y||0) + Math.max(-0.06, sus.y + roadNoise);
 
   // 合成旋转: 悬挂姿态 + 3D物理姿态(起飞/翻车) + 撞墙翻滚动画 (Z/X轴)
   let rx=sus.pitch + (c.pitch3d||0), rz=sus.roll + (c.roll||0);
@@ -3716,7 +3729,7 @@ function resetCarToTrack(c){
   const t = near.idx / NSAMP;
   const p = curve.getPointAt(t);
   const tangent = curve.getTangentAt(t);
-  c.pos.copy(p); c.pos.y=0;
+  c.pos.copy(p); // p 已包含赛道海拔
   c.y = 0; // 离地高度同步清零, 防止与 pos.y 不一致
   c.heading = Math.atan2(tangent.x, tangent.z);
   c.velocity.set(0,0,0);

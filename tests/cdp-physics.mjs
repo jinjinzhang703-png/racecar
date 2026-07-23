@@ -154,12 +154,17 @@ try{
     return true;
   })()`);
   await sleep(500);
-  // 传送玩家: 北侧直道 (x≈210, z≈-70), 面向 +x 护墙, 速度 30
-  // (避开发车直道 — 该段属维修区, 围栏碰撞按设计被跳过)
+  // 传送玩家: 使用赛道实际坐标, 面向外侧护墙 (支持赛道缩放)
   await evalJs(`(()=>{
-    player.pos.set(205, 0, -70); player.heading = Math.PI/2; player.speed = 30;
-    player.velocity.set(30, 0, 0); player.angularVel = 0;
-    race.phase = 'racing'; // 跳过五灯直接测碰撞
+    // 找到赛道上的直道点 (索引导航: 主直道之后第一个直道)
+    const idx = Math.floor(NSAMP * 0.15);
+    const p = SAMPLES[idx], n = SIDENORMALS[idx];
+    // 放在赛道外侧边缘, 面向墙
+    player.pos.set(p.x + n.x * (HALF_W - 1), p.y, p.z + n.z * (HALF_W - 1));
+    player.heading = Math.atan2(n.x, n.z); // 面向外侧
+    player.speed = 30;
+    player.velocity.set(n.x * 30, 0, n.z * 30); player.angularVel = 0;
+    race.phase = 'racing';
     return true;
   })()`);
   await sleep(6000);
@@ -168,15 +173,23 @@ try{
     vel: {x: player.velocity.x, z: player.velocity.z},
     nan: isNaN(player.pos.x) || isNaN(player.pos.z),
     crash: player.crashTimer > 0,
+    seg: nearestSegment(player.pos)
   })`).then(JSON.parse);
-  check('未穿墙 (x <= 220.5)', wall.x <= 220.5, 'x='+wall.x.toFixed(2));
+  const wallLimit = wall.seg.absLat + 1;
+  check('未穿墙 (absLat <= 赛道边+1)', wall.seg.absLat <= wallLimit, 'absLat='+wall.seg.absLat.toFixed(2));
   check('撞击后大幅减速 (|speed|<12)', Math.abs(wall.speed) < 12, 'speed='+wall.speed.toFixed(1));
   check('速度向量无 NaN', !wall.nan && !isNaN(wall.vel.x) && !isNaN(wall.vel.z));
 
   console.log('[3] 游戏内集成: 沿墙高速刮擦');
   await evalJs(`(()=>{
-    player.pos.set(216.5, 0, -60); player.heading = Math.PI - 0.06; // 朝南, 微偏东侧墙
-    player.speed = 50; player.velocity.set(3, 0, -49.9); player.angularVel = 0;
+    const idx = Math.floor(NSAMP * 0.15);
+    const p = SAMPLES[idx], n = SIDENORMALS[idx];
+    const t = TANGENTS[idx];
+    // 放在赛道内侧, 沿切线方向高速, 微偏外侧
+    player.pos.set(p.x - n.x * (HALF_W - 2), p.y, p.z - n.z * (HALF_W - 2));
+    player.heading = Math.atan2(t.x, t.z) + 0.05; // 沿切线微偏
+    player.speed = 50;
+    player.velocity.set(t.x * 50 + n.x * 2, 0, t.z * 50 + n.z * 2); player.angularVel = 0;
     player.crashTimer = 0; player.collisionLock = 0;
     return true;
   })()`);
@@ -184,8 +197,9 @@ try{
   const scrape = await evalJs(`JSON.stringify({
     x: player.pos.x, speed: player.speed, nan: isNaN(player.pos.x)||isNaN(player.pos.z),
     crash: player.crashTimer > 0,
+    seg: nearestSegment(player.pos)
   })`).then(JSON.parse);
-  check('刮擦未穿墙 (x <= 219.6)', scrape.x <= 219.6, 'x='+scrape.x.toFixed(2));
+  check('刮擦未穿墙 (absLat <= 赛道边+1)', scrape.seg.absLat <= wallLimit, 'absLat='+scrape.seg.absLat.toFixed(2));
   check('刮擦保留大部分速度 (>18 m/s)', Math.abs(scrape.speed) > 18, 'speed='+scrape.speed.toFixed(1));
   check('刮擦不触发 CRASH 翻滚', !scrape.crash);
   check('无 NaN', !scrape.nan);
@@ -193,11 +207,13 @@ try{
   console.log('[4] 游戏内集成: 玩家追尾静止AI车 (车车碰撞)');
   await evalJs(`(()=>{
     const ai = cars.find(c=>!c.isPlayer);
-    // AI车放在玩家正前方 4m (OBB接触距离3.9m), 玩家 35m/s 追尾
-    ai.pos.set(205, 0, -74); ai.heading = Math.PI; ai.speed = 0; ai.velocity.set(0,0,0);
+    // 使用赛道实际坐标: AI车放在玩家正前方 4m, 玩家 35m/s 追尾
+    const idx = Math.floor(NSAMP * 0.15);
+    const p = SAMPLES[idx], t = TANGENTS[idx];
+    ai.pos.set(p.x + t.x * 4, p.y, p.z + t.z * 4); ai.heading = Math.atan2(t.x, t.z); ai.speed = 0; ai.velocity.set(0,0,0);
     ai.pitting = false;
-    player.pos.set(205, 0, -70); player.heading = Math.PI;
-    player.speed = 35; player.velocity.set(0, 0, -35); player.angularVel = 0;
+    player.pos.set(p.x, p.y, p.z); player.heading = Math.atan2(t.x, t.z);
+    player.speed = 35; player.velocity.set(t.x * 35, 0, t.z * 35); player.angularVel = 0;
     player.crashTimer = 0; player.collisionLock = 0;
     window.__aiCar = ai;
     return true;

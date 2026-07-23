@@ -94,13 +94,13 @@ try{
   check('无 JS 错误', await t1.eval(`!document.querySelector('div[style*="z-index:9999"]')`));
   await t1.eval(`race.phase='racing'; 'ok'`);
 
-  // AI 巡检 30s: 无 NaN / 无越界 / 有速度
+  // AI 巡检 30s: 无 NaN / 无越界 / 有速度 (赛道放大1.5倍后坐标范围扩大)
   let allOk = true, speeds = [];
   for(let i=0;i<30;i++){
     await sleep(1000);
     const s = await t1.eval(`JSON.stringify(cars.map(c=>({x:c.pos.x,z:c.pos.z,sp:c.speed,nan:isNaN(c.pos.x)||isNaN(c.pos.z)})))`);
     for(const c of JSON.parse(s)){
-      if(c.nan || Math.abs(c.x)>600 || Math.abs(c.z)>600) allOk = false;
+      if(c.nan || Math.abs(c.x)>800 || Math.abs(c.z)>800) allOk = false;
       speeds.push(c.sp);
     }
   }
@@ -108,14 +108,16 @@ try{
   const avgSp = speeds.reduce((a,b)=>a+b,0)/speeds.length;
   check('AI 均速合理 (>20 m/s)', avgSp > 20, 'avg='+avgSp.toFixed(1));
   const lapEst = sakhirLen / avgSp;
-  check('圈速估计在 35~90s 合理带', lapEst > 35 && lapEst < 90, '≈'+lapEst.toFixed(0)+'s');
+  // 赛道放大1.5倍后圈速相应增加, 上限调整为 120s
+  check('圈速估计在 35~120s 合理带', lapEst > 35 && lapEst < 120, '≈'+lapEst.toFixed(0)+'s');
 
   // ---------- B: AI 在 sakhir 进站 ----------
   console.log('[B] AI 在 sakhir 进站');
   await t1.eval(`(()=>{
     const ai = cars.find(c=>!c.isPlayer);
     ai.tire = 15; ai.lap = 1; ai.pits = 0; ai.pitStopDuration = 2.0;
-    ai.pos.set(-372, 0, 338); ai.heading = Math.PI/2; ai.speed = 40; ai.velocity.set(40,0,0); ai.progress=0.97;
+    // Sakhir 顺时针后 pit 入口在 x=360, 主直道方向向西 (heading=-PI/2)
+    ai.pos.set(370, 0, 338); ai.heading = -Math.PI/2; ai.speed = 40; ai.velocity.set(-40,0,0); ai.progress=0.97;
     window.__ai = ai; return true;
   })()`);
   await waitFor(t1, `__ai.pitting===true`, 30000, 'AI决定进站');
