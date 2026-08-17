@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'racecar');
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.argv[2], 10) || 8000;
 const MIME = {
   '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',
@@ -108,6 +108,7 @@ function makeFrameParser(sock, onText, onClose){
       let off = 2;
       if(len === 126){ if(buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
       else if(len === 127){ if(buf.length < 10) return; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+      if(!Number.isFinite(len) || len < 0 || len > 1e6){ onClose(); return; } // 帧大小上限, 防恶意内存耗尽
       const maskOff = off;
       if(masked) off += 4;
       if(buf.length < off + len) return;
@@ -142,7 +143,8 @@ const server = http.createServer(async (req, res)=>{
     let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if(p === '/') p = '/racing-game.html';
     const file = path.join(ROOT, p);
-    if(!file.startsWith(ROOT)) throw new Error('forbidden');
+    // 边界校验: 必须是 ROOT 本身或其子路径 (防止前缀匹配绕过, 如读取兄弟目录)
+    if(file !== ROOT && !file.startsWith(ROOT + path.sep)) throw new Error('forbidden');
     const data = await readFile(file);
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',

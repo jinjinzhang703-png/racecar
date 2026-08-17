@@ -48,7 +48,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.BasicShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.outputEncoding = THREE.sRGBEncoding; // r149 兼容 (outputColorSpace 为 r152+)
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 
@@ -1043,7 +1043,7 @@ function buildFlyerProp(){
   const led=new THREE.Mesh(new THREE.TorusGeometry(22.5,0.3,6,48),ledMat);
   led.rotation.x=Math.PI/2; led.position.y=24;
   grp.add(led);
-  grp.position.set(250,-330,0);
+  grp.position.set(250, 0, -330);
   trackGroup.add(grp);
   // 缓慢旋转
   grp.userData.spin=()=>{ wheel.rotation.z+=0.002; };
@@ -1069,7 +1069,7 @@ function buildMbsProp(){
   const skyPark=new THREE.Mesh(new THREE.BoxGeometry(58,4,14),towerMat);
   skyPark.position.set(0,72,0); skyPark.castShadow=true;
   grp.add(skyPark);
-  grp.position.set(-150,-180,-400);
+  grp.position.set(-150, 0, -400);
   grp.rotation.y=0.3;
   trackGroup.add(grp);
 }
@@ -1337,13 +1337,13 @@ function buildPitBuilding(){
   // 维修间分隔 (每个车队一个, 在建筑内)
   for(let i=0;i<NCARS;i++){
     const divider=new THREE.Mesh(new THREE.BoxGeometry(0.3, 7, 11), wallMat);
-    const dx = -236+i*(640/NCARS); // 均匀分布
+    const dx = -236+i*(76/NCARS); // 均匀分布于80m建筑内 (原640导致隔墙悬空)
     divider.position.set(dx, 4, 300);
     pitGrp.add(divider);
     // 车队颜色标记 (顶部, 在玻璃幕墙上)
     const team=TEAMS[i%TEAMS.length];
     const colorBar=new THREE.Mesh(
-      new THREE.BoxGeometry(7.5, 0.3, 0.5),
+      new THREE.BoxGeometry(6, 0.3, 0.5),
       new THREE.MeshStandardMaterial({color:team.color, emissive:team.color, emissiveIntensity:0.5})
     );
     colorBar.position.set(dx+4, 8, 306);
@@ -1388,10 +1388,10 @@ function buildPitBuilding(){
   for(let i=0;i<NCARS;i++){
     const team=TEAMS[i%TEAMS.length];
     const wallBar=new THREE.Mesh(
-      new THREE.BoxGeometry(7, 0.2, 0.5),
+      new THREE.BoxGeometry(6, 0.2, 0.5),
       new THREE.MeshStandardMaterial({color:team.color, emissive:team.color, emissiveIntensity:0.6})
     );
-    wallBar.position.set(-236+i*(640/NCARS), 1.5, 324);
+    wallBar.position.set(-236+i*(76/NCARS), 1.5, 324);
     pitGrp.add(wallBar);
   }
 
@@ -1564,10 +1564,14 @@ function disposeTrackWorld(){
     if(o.geometry) o.geometry.dispose();
     if(o.material){
       for(const m of [].concat(o.material)){
-        if(m.map) m.map.dispose();
+        for(const key of ['map','emissiveMap','normalMap','roughnessMap','metalnessMap','aoMap','bumpMap','displacementMap','alphaMap','lightMap']){
+          if(m[key]) m[key].dispose();
+        }
         m.dispose();
       }
     }
+    // InstancedMesh 实例缓冲 (r149 无 dispose 方法, 有则调用)
+    if(o.isInstancedMesh && typeof o.dispose === 'function') o.dispose();
   });
   if(scene.userData.flyer) delete scene.userData.flyer;
   trackGroup = new THREE.Group();
@@ -1800,10 +1804,10 @@ function barrierCollision(c){
   let seg = nearestSegment(c.pos);
   c.sampleIdx = seg.i;
 
-  // 在维修通道内或正在进站时, 不执行赛道围栏碰撞 (允许车辆驶入维修区)
-  if(c.pitting || isInPitLane(c.pos)){
+  // 在维修通道内不执行赛道围栏碰撞 (允许车辆驶入维修区); 进站车仍在主赛道时保持正常碰撞, 防止穿墙
+  if(isInPitLane(c.pos)){
     // 维修通道两侧围墙: 真实的柔和碰撞 (防止高速冲出通道被隐形边界猛烈弹回)
-    if(!c.pitting) pitLaneWallCollision(c);
+    pitLaneWallCollision(c);
     c._lastHit = false;
     c.offTrack = false;
     return { seg, hit: false };
@@ -1986,11 +1990,11 @@ function updatePlayer(dt){
     c.pitTimer-=dt;
     c.speed*=0.92;
     if(c.pitTimer<=0){
-      c.tire=100; c.tireCompound='S';
+      c.tire=100; c.tireCompound = (c.tireType==='soft') ? 'S' : 'H';
       c.tireWearLaps=0; c.tireDegraded=false; c.tireSpeedMult=1.0; c.tireGripMult=1.0;
-      flashMsg('PIT DONE','新胎 · 软胎');
+      flashMsg('PIT DONE', (c.tireType==='soft') ? '新胎 · 软胎' : '新胎 · 硬胎');
     }
-  } else {
+  } else if(!c.inReverse){
     // ===== 真实物理: 非线性加速 + 空气阻力 + 速度制动 =====
     const v=c.speed;
     const vtop=c.maxSpeed;
@@ -2002,7 +2006,7 @@ function updatePlayer(dt){
     if(input.acc && (race.phase==='racing'||race.phase==='grid')){
       // 非线性加速: a = a0*(1-(v/vtop)^0.5) - drag*v²
       // 低速: 牵引力限制(高加速), 中高速仍有强加速, 极速: 阻力=驱动力
-      const driveAccel = c.accel * (1 - Math.pow(v/vtop, 0.5));
+      const driveAccel = c.accel * (1 - Math.pow(Math.max(0, v)/vtop, 0.5)); // 负速度防御 NaN
       const dragForce = 0.0009 * v * v;  // 空气阻力 ∝ v²
       c.speed += (driveAccel * tireGrip - dragForce) * dt;
     } else if(input.brake){
@@ -2020,7 +2024,7 @@ function updatePlayer(dt){
   // ERS 部署 (功率叠加) — 爆胎时效果减半 (与AI一致)
   let ersBoost=0;
   const playerErsFactor = c.tire <= 0 ? 0.5 : 1.0;
-  if(input.ers && c.ers>1 && race.phase==='racing'){ ersBoost=14*playerErsFactor; c.ers=Math.max(0,c.ers-22*dt); }
+  if(input.ers && c.ers>1 && race.phase==='racing' && !c.inReverse){ ersBoost=14*playerErsFactor; c.ers=Math.max(0,c.ers-22*dt); }
   else { c.ers=Math.min(100,c.ers+ (input.brake?26:6)*dt); }
   // DRS (降阻提速)
   c.drsActive=false;
@@ -2138,7 +2142,7 @@ function updatePlayer(dt){
   // 真实F1: 高速下压力提供强抓地力, 转向响应更快
   const driftBase = THREE.MathUtils.clamp(0.15 + v * 0.002, 0.12, 0.42);
   const driftFactor = driftBase * Math.max(0.5, effectiveGrip * 0.8);
-  c.velocity.lerp(desired, Math.min(driftFactor,1));
+  c.velocity.lerp(desired, Math.min(driftFactor * dt * 60, 1)); // 帧率无关
   c.pos.addScaledVector(c.velocity,dt);
 
   // 围栏硬碰撞 (冲不出去) — 第一次碰撞处理
@@ -2211,6 +2215,17 @@ function updateAI(c, dt){
     c.collisionCooldown -= dt;
   }
   if(race.phase!=='racing'){ c.speed*=0.9; applyMesh(c); updateProgress(c,dt); return; }
+  // 完赛车辆: 减速巡航, 不再全力竞速
+  if(c.finished){
+    c.speed = Math.max(0, c.speed - 20 * dt);
+    const ffwd = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
+    c.velocity.copy(ffwd).multiplyScalar(c.speed);
+    c.pos.addScaledVector(c.velocity, dt);
+    barrierCollision(c);
+    applyMesh(c);
+    updateProgress(c, dt);
+    return;
+  }
   // 离地/翻车: 无驱动抓地力, 按弹道滑行 (3D 姿态由 integrate3D 积分)
   if(c.airborne || c.flipped || c.y > 0){
     c.pos.addScaledVector(c.velocity, dt);
@@ -2231,7 +2246,7 @@ function updateAI(c, dt){
       return; // 超时取消, 直接返回
     }
     const pitLen = PIT_EXIT_X - PIT_ENTRY_X;
-    const pitBoxSpacing = pitLen / 12;
+    const pitBoxSpacing = pitLen / (NCARS + 2); // 与 buildPitLane 维修位一致 (原 /12 导致末位越界到出口外)
     const boxX = PIT_ENTRY_X + pitBoxSpacing * (c.pitBoxIdx + 1.5);
 
     if(c.pitPhase === 'entering'){
@@ -2333,7 +2348,10 @@ function updateAI(c, dt){
   {
     // 轮胎磨损: 与玩家公式一致 (基础0.12 + 加速0.08 + 转向0.06 + 高速0.04)
     const aiAccel = c.speed < c.maxSpeed * 0.9; // AI默认加速
-    const aiSteer = Math.abs(c.heading - (c._lastHeading || c.heading));
+    let dH = c.heading - (c._lastHeading !== undefined ? c._lastHeading : c.heading);
+    while(dH > Math.PI) dH -= 2*Math.PI;
+    while(dH < -Math.PI) dH += 2*Math.PI;
+    const aiSteer = Math.abs(dH);
     const aiSpeedFactor = c.speed > 50 ? 0.04 : 0;
     const wear = 0.12 + (aiAccel ? 0.08 : 0) + Math.min(0.06, aiSteer) + aiSpeedFactor;
     // 磨损率 ×1.6: 让 3-5 圈的比赛出现真实的进站窗口
@@ -2513,8 +2531,12 @@ function updateAI(c, dt){
   }
 
   // 最低速度保底 (正常模式 + 碰撞后强制提速)
-  const minSpeed = c.collisionCooldown > 0 ? c.maxSpeed*0.45 : c.maxSpeed*0.35;
-  if(!c.recoveryMode && c.speed < minSpeed) c.speed = minSpeed;
+  // 注意: 不得覆盖曲率限速 targetSpeed, 否则 AI 发夹弯必超速冲出
+  const minSpeed = Math.min(
+    c.collisionCooldown > 0 ? c.maxSpeed*0.45 : c.maxSpeed*0.35,
+    targetSpeed
+  );
+  if(!c.recoveryMode && c.speed < minSpeed && c.speed >= 0) c.speed = minSpeed;
 
   // === 避让 ===
   for(const o of cars){ if(o===c)continue;
@@ -2571,9 +2593,10 @@ function updateAI(c, dt){
       c._stuckTimer=0;
     }
   }
-  // 最低速度保底仅在非恢复且非碰撞锁定时
+  // 最低速度保底仅在非恢复且非碰撞锁定时 (同样不得覆盖 targetSpeed)
   if(!c.recoveryMode && c.collisionLock<=0){
-    if(c.speed<c.maxSpeed*0.25) c.speed=Math.max(c.speed,c.maxSpeed*0.3);
+    const floor = Math.min(c.maxSpeed*0.3, targetSpeed);
+    if(c.speed < floor && c.speed >= 0) c.speed = floor;
   }
 
   applyMesh(c);
@@ -3002,10 +3025,12 @@ function applyCarLivery(c, cfg){
       driver: cfg.driver,
       num: cfg.num,
       color: cfg.color,
-      accent: cfg.color
+      accent: cfg.accent || cfg.color
     };
+    const oldTex = c.mesh.userData.sidepodMat.map;
     const newTex = new THREE.CanvasTexture(makeCarTexture(garageTeam, true));
     c.mesh.userData.sidepodMat.map = newTex;
+    if(oldTex) oldTex.dispose();
     c.mesh.userData.sidepodMat.color.setHex(0xffffff);
     c.mesh.userData.sidepodMat.emissive.setHex(cfg.color);
     c.mesh.userData.sidepodMat.needsUpdate = true;
@@ -3027,6 +3052,23 @@ function applyCarLivery(c, cfg){
   }
 }
 
+// 释放单辆车的 GPU 资源 (几何体/材质/贴图), 防止跨比赛泄漏
+function disposeCar(c){
+  if(!c || !c.mesh) return;
+  c.mesh.traverse(o=>{
+    if(o.geometry) o.geometry.dispose();
+    if(o.material){
+      for(const m of [].concat(o.material)){
+        for(const key of ['map','emissiveMap','normalMap','roughnessMap','metalnessMap','aoMap','bumpMap','displacementMap','alphaMap']){
+          if(m[key]) m[key].dispose();
+        }
+        m.dispose();
+      }
+    }
+  });
+  scene.remove(c.mesh);
+}
+
 // config: { laps, difficulty, playerSlot, playerConfig,
 //           remotePlayers:[{ id, slot, teamName, short, driver, color, num, maxSpeed, tireType, tireMaxLaps }] }
 function startRace(config){
@@ -3042,9 +3084,13 @@ function startRace(config){
   }
   if(config.laps) totalLaps = config.laps;
   if(config.difficulty) difficulty = config.difficulty;
-  cars=[]; scene.children.filter(o=>o.userData&&o.userData.isCar).forEach(o=>scene.remove(o));
+  // 清理旧车辆 (含幽灵/预览车), 释放 GPU 资源
+  for(const c of cars) disposeCar(c);
+  if(player && player.mesh && !cars.includes(player)) disposeCar(player);
+  scene.children.filter(o=>o.userData&&o.userData.isCar).forEach(o=>scene.remove(o));
+  cars=[]; player=null;
   const playerCfg = config.playerConfig || getSelectedPlayerConfig();
-  const playerSlot = (config.playerSlot != null) ? config.playerSlot : Math.floor(NCARS/2);
+  const playerSlot = (config.playerSlot != null && config.playerSlot >= 0 && config.playerSlot < NCARS) ? config.playerSlot : Math.floor(NCARS/2);
   const remoteBySlot = {};
   for(const rp of (config.remotePlayers || [])) remoteBySlot[rp.slot] = rp;
   const aiFill = config.aiFill !== false;   // 联机可关闭 AI 补位
@@ -3088,6 +3134,7 @@ function startRace(config){
     cars.push(c);
   }
   raceClock=0; race.phase='grid'; race.lights=0; race.lightTimer=0;
+  prevPos=1; posNotifyTimer=0; // 重置位置通知 (防止新赛季首帧误报)
   // 联机: 房主指定的灭灯延迟, 各端一致才能同步起跑; 单机为 null (随机)
   race.lightsOutDelay = (config.lightsOutDelay != null) ? config.lightsOutDelay : null;
   // 重置全局状态 (防止跨比赛残留)
@@ -3180,9 +3227,11 @@ function flashMsg(m1,m2){ ui.msg.style.display='block'; ui.msg1.textContent=m1; 
 
 // ===== 位置变化追踪 =====
 let prevPos=1, posNotifyTimer=0;
-function checkPositionChange(){
-  const ranked=[...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
-  const curPos=ranked.indexOf(player)+1;
+function checkPositionChange(dt){
+  // 直接计数排名 (O(n)), 避免每帧全量排序
+  const myProg = rankProgress(player);
+  let curPos = 1;
+  for(const c of cars){ if(c!==player && rankProgress(c) > myProg) curPos++; }
   if(curPos!==prevPos && race.phase==='racing'){
     const diff=prevPos-curPos;
     if(diff>0){
@@ -3198,7 +3247,7 @@ function checkPositionChange(){
     prevPos=curPos;
   }
   if(posNotifyTimer>0){
-    posNotifyTimer-=1/60;
+    posNotifyTimer-=dt; // 帧率无关
     if(posNotifyTimer<=0) ui.posNotify.classList.remove('show');
   }
 }
@@ -3210,12 +3259,18 @@ function updateGapDisplay(){
     if(ui.gapBehindVal) ui.gapBehindVal.textContent='--';
     return;
   }
-  const ranked=[...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
-  const myIdx=ranked.indexOf(player);
+  // O(n) 扫描找前车/后车 (避免每帧全量排序)
+  const myProg = rankProgress(player);
+  let ahead = null, behind = null, bestAhead = Infinity, bestBehind = -Infinity;
+  for(const c of cars){
+    if(c === player) continue;
+    const p = rankProgress(c);
+    if(p > myProg && p < bestAhead){ bestAhead = p; ahead = c; }
+    else if(p < myProg && p > bestBehind){ bestBehind = p; behind = c; }
+  }
   // 前车
-  if(myIdx>0){
-    const ahead=ranked[myIdx-1];
-    const gap=rankProgress(ahead)-rankProgress(player);
+  if(ahead){
+    const gap=bestAhead-myProg;
     // 转换为时间 (用最低速度 20 m/s 防止除零)
     const refSpeed=Math.max(Math.abs(player.speed), 20);
     const gapTime=Math.max(0.1, gap/1000*90/refSpeed);
@@ -3231,9 +3286,8 @@ function updateGapDisplay(){
     ui.gapAheadVal.className='';
   }
   // 后车
-  if(myIdx<ranked.length-1){
-    const behind=ranked[myIdx+1];
-    const gap=rankProgress(player)-rankProgress(behind);
+  if(behind){
+    const gap=myProg-bestBehind;
     const refSpeed2=Math.max(Math.abs(player.speed), 20);
     const gapTime=Math.max(0.1, gap/1000*90/refSpeed2);
     ui.gapBehindVal.textContent='+'+gapTime.toFixed(1)+'s';
@@ -3295,8 +3349,10 @@ function updateHUD(dt){
   if(!player) return;
   const c=player;
   ui.lapBig.textContent=Math.min(c.lap+1,totalLaps);
-  const ranked=[...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
-  const pos=ranked.indexOf(c)+1;
+  // O(n) 计数排名 (避免每帧全量排序)
+  const myProgH = rankProgress(c);
+  let pos = 1;
+  for(const o of cars){ if(o !== c && rankProgress(o) > myProgH) pos++; }
   ui.posBig.textContent='P'+pos;
   const kph=Math.round(Math.abs(c.speed)*3.2);
   ui.speedo.textContent=kph;
@@ -3434,9 +3490,9 @@ addEventListener('keydown',e=>{
   if(k==='KeyC'){ toggleCam(); }
   if(k==='KeyP'){ if(race.phase==='racing'){race.phase='paused';ui.pauseScreen.classList.remove('hidden');} else if(race.phase==='paused'){race.phase='racing';ui.pauseScreen.classList.add('hidden');} }
   if(k==='KeyQ' && race.phase==='racing' && player.pitTimer<=0 && !pitGame.active) tryPit();
-  // 换胎小游戏按键处理: ESC 取消, 字母键作答
-  if(pitGame.active && k==='Escape'){ cancelPitStop(); return; }
-  if(pitGame.active) handlePitGameKey(k);
+  // 换胎小游戏按键处理: ESC 取消, 字母键作答 (仅在比赛中, 暂停时忽略)
+  if(pitGame.active && race.phase==='racing' && k==='Escape'){ cancelPitStop(); return; }
+  if(pitGame.active && race.phase==='racing') handlePitGameKey(k);
   if(k==='KeyR' && race.phase==='racing') resetPlayerToTrack();
 });
 addEventListener('keyup',e=>{
@@ -3646,15 +3702,17 @@ function resetPlayerToTrack(){
 
 // 计算与前车的时间差 (秒), 返回 {ahead: car|null, gapSeconds: number}
 function getGapToAhead(c){
-  const ranked=[...cars].sort((a,b)=>rankProgress(b)-rankProgress(a));
-  const myIdx=ranked.indexOf(c);
-  if(myIdx<=0) return {ahead:null, gapSeconds:999};
-  const ahead=ranked[myIdx-1];
-  const gapProg = rankProgress(ahead) - rankProgress(c);
-  // 转换为时间: progress差 / 1000 * 一圈参考秒数
-  const refSpeed = Math.max(c.speed, 20);
-  const gapSeconds = Math.max(0.1, gapProg / 1000 * 90 / refSpeed * 1000 / 1000);
-  // 简化: gapProg/1000 = 圈数差, 乘以一圈参考时间(90秒)再按速度修正
+  // O(n) 扫描 (避免每帧全量排序)
+  const myProg = rankProgress(c);
+  let ahead = null, bestAhead = Infinity;
+  for(const o of cars){
+    if(o === c) continue;
+    const p = rankProgress(o);
+    if(p > myProg && p < bestAhead){ bestAhead = p; ahead = o; }
+  }
+  if(!ahead) return {ahead:null, gapSeconds:999};
+  const gapProg = bestAhead - myProg;
+  const refSpeed = Math.max(Math.abs(c.speed), 20);
   const lapRefTime = 90;
   const speedFactor = 60 / refSpeed; // 以60m/s为基准
   return {ahead, gapSeconds: gapProg/1000 * lapRefTime * speedFactor};
@@ -3695,6 +3753,11 @@ function endRace(){
   ui.overSub.textContent = pos===1?`${player.name} · ${player.teamName} · 夜赛冠军！`:`${player.name} · ${player.teamName} · 最终成绩`;
   ui.overScreen.classList.remove('hidden');
   race.phase='over';
+  // 清理残留状态 (防止带入下一场)
+  if(typeof pitGame !== 'undefined') pitGame.active = false;
+  const pitEl = $('pitGamePanel'); if(pitEl) pitEl.style.display='none';
+  input.acc=false; input.brake=false; input.steer=0;
+  input.steerLeft=false; input.steerRight=false; input.ers=false; input.drs=false; input.pit=false;
   // 联机: 上报完赛, 由房主汇总最终名次表 (lobby.js)
   if(typeof window.onLocalFinish==='function'){
     window.onLocalFinish({ time: player.finishTime || raceClock });
@@ -3766,7 +3829,11 @@ function initAudio(){
     tireSrc.start();
 
     audioInitialized=true;
-  } catch(e){ console.warn('Audio init failed:', e); }
+  } catch(e){
+    console.warn('Audio init failed:', e);
+    // 失败时关闭已建 ctx, 避免重试叠加创建 (浏览器有数量上限)
+    if(audioCtx){ try{ audioCtx.close(); }catch(_){} audioCtx=null; }
+  }
 }
 
 // 播放碰撞音效
@@ -3823,7 +3890,7 @@ function updateTireSound(slipAmount){
   tireFilter.frequency.linearRampToValueAtTime(900+slipAmount*700, t+0.05);
 }
 
-function updateEngineSound(){
+function updateEngineSound(dt){
   if(!audioInitialized || !audioCtx || !player) return;
   const t=audioCtx.currentTime;
   // 暂停/菜单时全部静音
@@ -3855,16 +3922,17 @@ function updateEngineSound(){
   windGain.gain.linearRampToValueAtTime(wvol, t+0.1);
   windFilter.frequency.linearRampToValueAtTime(400+spd*6, t+0.1);
   // 收油爆震: 高转速松油门随机放炮
-  crackleTimer-=1/60;
+  crackleTimer-=dt;
   if(!input.acc && rpm>9000 && crackleTimer<=0){
     crackleTimer=0.05+Math.random()*0.12;
     playCrackle(0.03+Math.random()*0.05);
   }
 }
 
-// 首次交互时初始化音频
-document.addEventListener('click', ()=>{ if(!audioInitialized) initAudio(); }, {once:false});
-document.addEventListener('keydown', ()=>{ if(!audioInitialized) initAudio(); }, {once:false});
+// 首次交互时初始化音频; 之后每次交互/回前台时恢复 (suspended 自愈)
+document.addEventListener('click', ()=>{ if(!audioInitialized) initAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:false});
+document.addEventListener('keydown', ()=>{ if(!audioInitialized) initAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:false});
+document.addEventListener('visibilitychange', ()=>{ if(audioCtx && document.visibilityState==='visible' && audioCtx.state==='suspended') audioCtx.resume(); });
 
 // ============================================================
 //  轮胎印系统
@@ -3879,7 +3947,7 @@ function spawnTireMark(pos, heading){
     // 移除最旧的
     const old=tireMarks.shift();
     scene.remove(old);
-    old.geometry.dispose();
+    old.material.dispose(); // 共享 tireMarkGeo 不可 dispose, 仅释放克隆材质
   }
   const mark=new THREE.Mesh(tireMarkGeo, tireMarkMat.clone());
   mark.position.set(pos.x, 0.03, pos.z);
@@ -3889,11 +3957,11 @@ function spawnTireMark(pos, heading){
   tireMarks.push(mark);
 }
 
-function updateTireMarks(){
-  // 逐渐淡化旧轮胎印
+function updateTireMarks(dt){
+  // 逐渐淡化旧轮胎印 (帧率无关)
   for(let i=tireMarks.length-1;i>=0;i--){
     const m=tireMarks[i];
-    m.material.opacity-=0.001;
+    m.material.opacity-=dt*0.06;
     if(m.material.opacity<=0){
       scene.remove(m);
       m.material.dispose();
@@ -3908,11 +3976,11 @@ function updateTireMarks(){
 const particles = [];
 const MAX_PARTICLES = 120; // 增加粒子上限, 支持爆胎特效
 const sparkGeo = new THREE.SphereGeometry(0.08, 4, 4);
-const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true });
 const smokeGeo = new THREE.SphereGeometry(0.3, 6, 6);
 const smokeMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.4 });
 const debrisGeo = new THREE.BoxGeometry(0.12, 0.06, 0.08);
-const debrisMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+const debrisMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true });
 
 function spawnSparks(pos, count) {
   for (let i = 0; i < count && particles.length < MAX_PARTICLES; i++) {
@@ -3963,7 +4031,7 @@ function updateParticles(dt) {
     p.life -= dt;
     if (p.life <= 0) {
       scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
+      // 注意: 共享几何体 (sparkGeo/smokeGeo/debrisGeo) 不可 dispose, 仅释放克隆材质
       p.mesh.material.dispose();
       particles.splice(i, 1);
       continue;
@@ -4043,6 +4111,11 @@ document.addEventListener('visibilitychange',()=>{
 function updateRemoteCar(c){
   const a=c._netPrev, b=c._netNext;
   if(!b) return;
+  // 超时检测: 对端断线且 close 事件未触发 (网络分区/异常), 3秒无状态则标记完赛退出, 避免永久路障
+  if(performance.now() - b.t > 3000){
+    if(!c.finished){ c.finished = true; c.finishTime = 1e6; c.speed = 0; }
+    return;
+  }
   if(!a || b.t<=a.t){
     c.pos.set(b.p[0],b.p[1],b.p[2]);
     c.heading=b.h; c.speed=b.v;
@@ -4083,7 +4156,7 @@ function loop(){
       catch(e){ console.warn('AI error:', e); }
     }
     if(typeof window.MPraceTick==='function') window.MPraceTick(dt); // 联机状态广播 (20Hz)
-    try{ carCollisions(); } catch(e){}
+    try{ carCollisions(); } catch(e){ console.warn('carCollisions error:', e); }
     // 碰撞翻滚动画计时 (纯视觉, 不冻结车辆); AI 翻滚结束后进入恢复模式
     for(const c of cars){
       if(c.crashTimer>0){
@@ -4116,7 +4189,7 @@ function loop(){
   }
   updateTireEffects(dt);
   updateParticles(dt);
-  updateEngineSound();
+  updateEngineSound(dt);
   // 轮胎啸叫声 (基于滑移量)
   if(player && race.phase==='racing'){
     const velLen=player.velocity.length();
@@ -4134,7 +4207,7 @@ function loop(){
     }
     updateTireSound(slip);
   }
-  updateTireMarks();
+  updateTireMarks(dt);
   // 对手标记脉冲动画 (环 + 光柱 + 箭头)
   for(const c of cars){
     if(c.marker){
@@ -4168,7 +4241,7 @@ function loop(){
   }
   updateCamera(dt);
   updateHUD(dt);
-  checkPositionChange();
+  checkPositionChange(dt);
   updateGapDisplay();
   updateWarnings();
   updateSpeedBlur();
@@ -4182,8 +4255,10 @@ function carCollisions(){
     // 宽相剔除: 车体对角线 ~3.1m, 两车最远距离 6.2m
     const dx=b.pos.x-a.pos.x, dz=b.pos.z-a.pos.z;
     if(dx*dx+dz*dz > 6.2*6.2) continue;
-    // 进站车辆不参与碰撞
-    if(a.pitting || b.pitting) continue;
+    // 维修通道内的车辆不参与主赛道碰撞 (进站车仍在主赛道时需正常碰撞, 防止穿墙/穿透)
+    if(isInPitLane(a.pos) || isInPitLane(b.pos)) continue;
+    // 完赛车辆不再参与碰撞 (防止干扰未完赛车辆)
+    if(a.finished || b.finished) continue;
     // 窄相: OBB vs OBB (SAT)
     const contact = Physics2D.obbContact(a, b);
     if(!contact) continue;
@@ -4278,7 +4353,7 @@ $('retryBtn').addEventListener('click', ()=>{
   if(window.onRaceRetry){ window.onRaceRetry(); return; }
   openGarage();
 });
-$('resumeBtn').addEventListener('click',()=>{ race.phase='racing'; ui.pauseScreen.classList.add('hidden'); });
+$('resumeBtn').addEventListener('click',()=>{ if(race.phase==='paused') race.phase='racing'; ui.pauseScreen.classList.add('hidden'); });
 // 第一/第三人称切换按钮
 function toggleCam(){
   camMode=1-camMode;

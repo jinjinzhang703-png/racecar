@@ -4,6 +4,10 @@
 // ============================================================
 (function(){
 'use strict';
+
+// 如果 WebGL 不可用 (game.js 已 showNoWebGL 并 throw), 跳过所有 UI 初始化
+if(typeof webglOK === 'function' && !webglOK()) return;
+
 const $ = id => document.getElementById(id);
 
 // ---------- 屏幕切换 ----------
