@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marina Bay GP · 3D 建模与比例复盘</title>
+<style>
+:root{--bg:#0c101b;--panel:#141c2b;--panel2:#182337;--ink:#eef4ff;--muted:#9baac2;--line:#2a3a55;--red:#ff5b68;--amber:#ffc857;--green:#42dc9b;--blue:#72b7ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,#1c2942 0,#0c101b 42%);color:var(--ink);font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}main{max-width:1500px;margin:auto;padding:32px 24px 56px}h1{margin:0;font-size:clamp(26px,4vw,46px);letter-spacing:.02em}h2{margin:0 0 14px;font-size:19px}h3{margin:0 0 6px;font-size:15px}.eyebrow{color:var(--blue);font-size:11px;letter-spacing:.2em;font-weight:800}.subtitle{color:var(--muted);margin:8px 0 24px}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:22px}.links{display:flex;flex-wrap:wrap;gap:8px}.links a{color:var(--ink);text-decoration:none;border:1px solid var(--line);background:#111a2a;padding:8px 12px;border-radius:8px}.cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:18px 0 24px}.card,.section{background:linear-gradient(145deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:12px}.card{padding:14px}.card .v{font-size:25px;font-weight:850}.card .l{color:var(--muted);font-size:11px;margin-top:2px}.section{padding:18px;margin-top:16px}.note{border-left:4px solid var(--amber);background:#292313;padding:12px 14px;border-radius:7px;color:#ffe4a0}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}.muted{color:var(--muted)}table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;font-size:13px}th,td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#0f1827;color:#b9c8df;font-size:11px;letter-spacing:.06em;white-space:nowrap}tr:last-child td{border-bottom:0}tbody tr:hover{background:rgba(114,183,255,.05)}.sev{display:inline-flex;min-width:48px;justify-content:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800}.p0{background:#54222b;color:#ff9ba5}.p1{background:#554116;color:#ffe09a}.p2{background:#173c56;color:#a9d8ff}.p3{background:#1b4438;color:#9cf0c9}.status{font-weight:800;white-space:nowrap}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric{padding:12px;background:#101927;border:1px solid var(--line);border-radius:8px}.metric b{display:block;font-size:19px}.metric span{display:block;color:var(--muted);font-size:11px}.formula{font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0a111c;border:1px solid var(--line);padding:12px;border-radius:8px;color:#c8d8ef;overflow:auto}.evidence{display:flex;flex-wrap:wrap;gap:8px}.pill{padding:5px 9px;border-radius:6px;background:#101927;border:1px solid var(--line);color:#c9d7eb;font-size:12px}.footer{color:var(--muted);font-size:12px;margin-top:24px}@media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}.metrics{grid-template-columns:repeat(2,1fr)}.hero{display:block}}@media(max-width:640px){main{padding:22px 12px}.cards{grid-template-columns:repeat(2,1fr)}.metrics{grid-template-columns:1fr}table{min-width:1050px}.section{overflow:auto}}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div><div class="eyebrow">MARINA BAY GP · MODEL QA REVIEW</div><h1>新加坡夜赛 3D 建模与比例复盘表</h1><p class="subtitle">线上试玩 + Blender/GLB 几何核对 · 记录日期：2026-10-03 · 版本：main @ 91e50cf</p></div>
+    <div class="links"><a href="https://racecar-ex4.pages.dev/" target="_blank">打开游戏</a><a href="https://github.com/jinjinzhang703-png/racecar" target="_blank">GitHub 仓库</a></div>
+  </header>
+
+  <div class="note"><b>结论先行：</b>模型已经成功加载并成为滨海湾主视觉赛道，但几何路线和现有物理路点没有达到可验收的同一坐标系。最严重的问题是 <b>纵向覆盖范围不足、模型路线与碰撞路线偏离、起点/维修区/护墙可能不共线</b>。本表是下一轮建模修复的验收清单；它不把当前的程序化二维碰撞当作 3D 模型碰撞。</div>
+
+  <div class="cards">
+    <div class="card"><div class="v bad">P0 · 2</div><div class="l">需要优先修复</div></div>
+    <div class="card"><div class="v warn">P1 · 5</div><div class="l">影响比例/观感/性能</div></div>
+    <div class="card"><div class="v">16.7 MB</div><div class="l">GLB 传输体积</div></div>
+    <div class="card"><div class="v">67.6 m</div><div class="l">路点到模型最近中心的平均偏差</div></div>
+    <div class="card"><div class="v">168.2 m</div><div class="l">最大路点偏差</div></div>
+  </div>
+
+  <section class="section"><h2>一、复盘范围与实际试玩结果</h2><div class="metrics">
+    <div class="metric"><b class="ok">通过</b><span>首页、选赛道、车库、开始比赛</span></div>
+    <div class="metric"><b class="ok">200</b><span>线上 GLB 请求状态（model/gltf-binary）</span></div>
+    <div class="metric"><b class="ok">0 km/h → 1 km/h</b><span>真实键盘输入后可起步，但本轮无法稳定完成一圈</span></div>
+    <div class="metric"><b class="warn">受限</b><span>浏览器截图接口超时，未取得持久 PNG 视觉证据</span></div>
+  </div><p class="muted">试玩路径：打开线上页面 → 单人练习 → MARINA BAY → 进入车库 → CONFIRM &amp; RACE → 使用真实 W/D 输入。首次大写 W 没有被浏览器控件传入页面；改用小写 w 后出现 “GO! / 比赛开始”，HUD 计时从 0:00.00 进入 0:00.35，但连续输入只把速度推到约 1 km/h，无法用当前自动化输入完成完整赛道视觉巡检。以下几何问题来自实际导出的 GLB、游戏路点和页面状态的交叉核对。</p></section>
+
+  <section class="section"><h2>二、所有已发现的建模、比例、对齐与碰撞问题</h2><table><thead><tr><th>ID</th><th>优先级</th><th>问题域</th><th>问题与证据</th><th>影响</th><th>建议修复 / 验收标准</th><th>状态</th></tr></thead><tbody>
+    <tr><td>GEO-001</td><td><span class="sev p0">P0</span></td><td>路线对齐</td><td><b>模型中心线与游戏路点明显偏离。</b>将 TrackSurface 变换到当前游戏坐标后，43 个游戏路点到模型采样中心的最近距离平均 <b>67.6 m</b>，最大 <b>168.2 m</b>。</td><td>赛车会沿不可见的二维路线行驶，视觉上可能偏离柏油路、弯心和护墙；“模型是主赛道”目前只成立于渲染层。</td><td>在 Blender 中以同一组中心线点拟合 TrackSurface，或把 `tracks.js` 路点从模型中心线重新采样；验收：43 个路点最近距离平均 &lt; 2 m，最大 &lt; 5 m。</td><td class="status bad">未修复</td></tr>
+    <tr><td>GEO-002</td><td><span class="sev p0">P0</span></td><td>纵向比例</td><td>当前配置 `scale: [0.41, 0.41, 0.54]` 后，模型赛道包围范围约 X <b>[-377.7, 210.2]</b>、Z <b>[-159.2, 337.8]</b>；游戏路点约 X <b>[-380, 213]</b>、Z <b>[-295, 342]</b>。Z 方向覆盖少约 <b>136 m</b>。</td><td>北侧/南侧弯道、模型建筑和碰撞赛道不能完整覆盖同一圈；局部会出现道路缩短或场景与路线错位。</td><td>重新计算统一水平比例与平移，不使用未经拟合的各向异性缩放；验收：模型道路包围盒至少覆盖所有路点并留 8.8 m 护墙边界余量。</td><td class="status bad">未修复</td></tr>
+    <tr><td>GEO-003</td><td><span class="sev p1">P1</span></td><td>起点 / 发车格</td><td>游戏发车格固定在 `grid: {x:-300,z:340,heading:π/2}`，而模型 TrackSurface 的几何起点并未用同一锚点拟合；当前路线偏差中发车直道点也处于最差组。</td><td>车可能出生在模型道路边缘、护墙附近或道路外；发车方向与模型直道方向可能不一致。</td><td>在 Blender 里建立 `START_ANCHOR` 空物体并导出元数据；用同一锚点生成 `grid` 与 `heading`。验收：P1 车中心距模型道路中心 &lt; 1 m，车头方向与切线误差 &lt; 3°。</td><td class="status warn">待校准</td></tr>
+    <tr><td>GEO-004</td><td><span class="sev p1">P1</span></td><td>护墙与碰撞</td><td>GLB 有真实 Barrier/TrackSurface 网格，但游戏仍使用程序化 `WALL_DIST = 8.8` 与二维路点碰撞；GLB 加载后只是隐藏程序化视觉层。</td><td>视觉护墙与实际碰撞墙可相距数十米；车辆可能“撞空气”、穿过模型墙，或在道路上看似无墙却被弹回。</td><td>先完成 GEO-001/002，再从模型 Barrier 采样成低模二维边界；验收：随机 100 个边界采样点，视觉墙与碰撞墙误差 ≤ 0.5 m。</td><td class="status warn">架构保底</td></tr>
+    <tr><td>GEO-005</td><td><span class="sev p1">P1</span></td><td>维修区</td><td>游戏维修区仍固定在 `laneZ=318`、`laneHalfW=5`、入口/出口 X 范围；模型的 A3_PitLane 与主 TrackSurface 没有完成同坐标拟合。</td><td>进站入口、内墙开口、维修位建筑可能与模型车道错位，出现斜插、悬空或穿过玻璃/墙体。</td><td>由模型 PitLane 网格生成 lane 中线、半宽、入口、出口和 gap；验收：进站 20 次，车辆四角不穿内外墙，入口/出口与可见开口重合。</td><td class="status warn">待校准</td></tr>
+    <tr><td>GEO-006</td><td><span class="sev p1">P1</span></td><td>城市建筑比例</td><td>导出选择包含 MarinaBay_City、Landmarks、Props、StartUpgrade 等大量场景集合；场景总导出对象约 <b>1342 个 mesh node</b>。当前没有独立的“赛车可比尺寸”标尺或人形/车辆锚点。</td><td>金沙、摩天轮、看台、灯杆与 F1 车辆的相对尺寸无法由代码保证；建筑可能过大、过小或离道路过远。</td><td>Blender 场景加入 5.85 m 车辆代理、1.8 m 人形、道路 16 m 标尺；验收：主看台、灯杆、地标相对车辆比例由代理测量，并在导出前冻结变换。</td><td class="status warn">需人工视觉验收</td></tr>
+    <tr><td>GEO-007</td><td><span class="sev p1">P1</span></td><td>垂直高度</td><td>游戏车辆物理使用 y=0 平面并通过 `y/airborne` 做简化跳跃；GLB 路面高度、路缘高度、护墙顶部和坡度没有被提取到碰撞系统。</td><td>车辆可能贴地穿过路缘、桥面/坡道与模型发生高度穿模；摄像机看到的高低差与车辆物理不一致。</td><td>从 TrackSurface 生成简化高度采样，或明确将模型道路烘焙为 y=0 平面；验收：坡道/路缘垂直误差 &lt; 0.15 m，车轮不悬空。</td><td class="status warn">未纳入 3D 碰撞</td></tr>
+    <tr><td>GEO-008</td><td><span class="sev p2">P2</span></td><td>材质 / 贴图</td><td>GLB 内含大量嵌入材质与贴图，线上资源约 16.7 MB；当前没有纹理 LOD、KTX2、Draco/Meshopt 或按距离隐藏策略。</td><td>移动端首屏加载慢、显存峰值高；大量灯光/座椅/城市细节可能造成低帧率。</td><td>合并重复材质、压缩纹理、按赛道段落拆包或启用 LOD；验收：桌面首屏模型可交互 &lt; 3 s，移动端内存/帧率达到目标设备基线。</td><td class="status warn">待优化</td></tr>
+    <tr><td>GEO-009</td><td><span class="sev p2">P2</span></td><td>灯光 / 阴影</td><td>GLB 关闭了导入 mesh 的 castShadow，仅保留 receiveShadow；游戏同时使用程序化月光、城市灯光和模型发光材质。</td><td>模型护墙、看台和车辆的阴影关系可能不一致；夜赛视觉层次会依赖材质自发光而不是统一光照。</td><td>按对象类别开启近场阴影，远场关闭；统一色温、曝光和雾效；验收：车、护墙、看台在同一光源方向下有稳定接触阴影。</td><td class="status warn">需视觉验收</td></tr>
+    <tr><td>GEO-010</td><td><span class="sev p2">P2</span></td><td>加载状态 / 回退</td><td>线上 GLB、GLTFLoader 均返回 200；失败时会保留程序化赛道回退。模型成功后通过隐藏程序化视觉组避免重叠。</td><td>回退可靠，但首次加载期间会先显示程序化场景，短暂切换可能造成视觉跳变。</td><td>加载前显示稳定遮罩或低模占位；加载完成后淡入 GLB；验收：慢网速下无双层道路、无闪烁、无未捕获异常。</td><td class="status ok">部分通过</td></tr>
+    <tr><td>COL-001</td><td><span class="sev p1">P1</span></td><td>高速穿模</td><td>已加入基于位移的自适应子步，单步约 ≤ 0.65 m，并对所有车身角点重复检测；物理回归中正面撞墙不穿墙、无 NaN。</td><td>显著降低高速跨过二维边界的概率，但无法解决视觉 GLB 与二维边界错位。</td><td>模型路线校准后继续做 100 次随机高速撞墙；验收：所有车身角点始终不超过视觉边界 0.5 m。</td><td class="status ok">代码已修复，需模型对齐</td></tr>
+    <tr><td>COL-002</td><td><span class="sev p1">P1</span></td><td>贴墙摩擦</td><td>已修复子步重复施加墙冲量导致刮擦速度过度下降的问题；回归结果：刮擦速度约 38.4 m/s，未触发 CRASH。</td><td>当前二维物理表现通过，但视觉墙不对齐时仍可能出现“空气摩擦”。</td><td>把碰撞边界换成模型 Barrier 的低模采样后复测；验收：切向速度保留率 ≥ 70%。</td><td class="status ok">二维物理通过</td></tr>
+    <tr><td>TEST-001</td><td><span class="sev p2">P2</span></td><td>试玩工具限制</td><td>浏览器截图接口连续超时，无法取得本轮持久 PNG；大写 `W` 的自动化按键未生效，小写 `w` 才触发 GO。</td><td>本轮无法用自动化工具完成整圈“视觉巡检”；不应把未看到的建筑比例判定为通过。</td><td>用真实桌面键盘/鼠标或修复测试运行时的 keydown 持续按键与截图链路；验收：保存起步、T1、长直道、进站、撞墙五张证据图。</td><td class="status warn">测试受限</td></tr>
+  </tbody></table></section>
+
+  <section class="section"><h2>三、当前测量数据</h2><div class="metrics">
+    <div class="metric"><b>1446.5 × 933.3</b><span>Blender TrackSurface 原始水平尺寸</span></div>
+    <div class="metric"><b>~588.0 × 497.0</b><span>按当前 scale 转换后的模型 TrackSurface 尺寸</span></div>
+    <div class="metric"><b>~593 × 637</b><span>游戏 marina-bay 路点包围尺寸</span></div>
+    <div class="metric"><b>1342 mesh nodes</b><span>导出的 GLB 节点规模（含城市/地标/道具）</span></div>
+  </div><p class="formula">当前变换：gameX = blenderX × 0.41 − 70；gameZ ≈ blenderY × 0.54 + 100。<br>问题：X 范围基本接近，但 Z 范围明显不足；更重要的是逐点最近距离仍很大，说明不是简单平移/缩放即可解决，必须重新拟合路线或修订游戏路点。</p></section>
+
+  <section class="section"><h2>四、建议修复顺序</h2><ol><li><b class="bad">先做 GEO-001 + GEO-002：</b>在 Blender 里确定 TrackSurface 的真实中心线、起点锚点、行驶方向和统一比例。</li><li><b>再做 GEO-003 + GEO-005：</b>从同一锚点生成发车格、维修区、DRS/分段和入口出口。</li><li><b>再做 GEO-004 + COL-001：</b>从 Barrier 网格生成低模二维碰撞边界，保留 GLB 高模只负责渲染。</li><li><b>最后做 GEO-006 至 GEO-009：</b>用车辆代理和标尺复核城市建筑、地标、灯光、材质与性能。</li><li>补齐五张视觉证据截图后，才把“比例/观感”类项目改为通过。</li></ol></section>
+
+  <section class="section"><h2>五、已通过的代码回归（不能替代模型视觉验收）</h2><div class="evidence"><span class="pill ok">正面撞墙不穿墙</span><span class="pill ok">高速贴墙速度保留 38.4 m/s</span><span class="pill ok">车车碰撞无 NaN</span><span class="pill ok">GLB HTTP 200</span><span class="pill ok">GLTFLoader HTTP 200</span><span class="pill ok">线上 HUD 可开始</span></div></section>
+
+  <p class="footer">报告文件由 ZCode 生成。结论区分了“已由代码/资源测量验证”和“需要视觉试玩验证”；截图服务超时，因此本报告没有伪造图片证据。</p>
+</main>
+</body>
+</html>
