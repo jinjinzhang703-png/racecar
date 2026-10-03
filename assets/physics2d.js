@@ -90,10 +90,15 @@ const Physics2D = (function(){
   //  返回 { vn, vt } 碰撞前接触点法/切向速度; 已在分离则返回 null
   // ============================================================
   const _v = {x:0, z:0};
-  function wallResolve(b, px, pz, nx, nz, pen){
+  function wallResolve(b, px, pz, nx, nz, pen, allowImpulse=true){
     const rx = px - b.pos.x, rz = pz - b.pos.z;
     contactVel(b, rx, rz, _v);
     const vn = _v.x*nx + _v.z*nz;      // <0 = 正在接近墙
+    if(!allowImpulse){
+      const corrOnly = Math.min(MAX_CORRECTION, Math.max(pen - SLOP, 0) * BETA);
+      b.pos.x += nx*corrOnly; b.pos.z += nz*corrOnly;
+      return null;
+    }
     if(vn >= 0){
       // 已分离: 仅做位置修正防残留穿透
       const corr0 = Math.min(MAX_CORRECTION, Math.max(pen - SLOP, 0) * BETA);
@@ -106,6 +111,12 @@ const Physics2D = (function(){
     const rt = cross(rx,rz,tx,tz);
     const kn = b._invMass + rn*rn*b._invInertia;
     const kt = b._invMass + rt*rt*b._invInertia;
+    // 运动学刚体没有可求解的冲量分母；仍做位置修正，但不制造 Infinity/NaN。
+    if(kn <= 1e-9 || kt <= 1e-9 || !isFinite(kn) || !isFinite(kt)){
+      const corrOnly = Math.min(MAX_CORRECTION, Math.max(pen - SLOP, 0) * BETA);
+      b.pos.x += nx*corrOnly; b.pos.z += nz*corrOnly;
+      return null;
+    }
 
     // 恢复系数随撞击烈度降低 (高速重撞: 能量被护墙+车体吸收)
     const e = Math.abs(vn) > WALL.SPEED_REF ? WALL.REST_HIGH : WALL.REST_LOW;
@@ -223,6 +234,10 @@ const Physics2D = (function(){
     const rtA = cross(rax,raz,tx,tz), rtB = cross(rbx,rbz,tx,tz);
     const kn = a._invMass + b._invMass + rnA*rnA*a._invInertia + rnB*rnB*b._invInertia;
     const kt = a._invMass + b._invMass + rtA*rtA*a._invInertia + rtB*rtB*b._invInertia;
+    if(kn <= 1e-9 || kt <= 1e-9 || !isFinite(kn) || !isFinite(kt)){
+      separate(a, b, contact);
+      return null;
+    }
 
     const jn = -(1 + CARCAR.RESTITUTION) * vn / kn;    // vn>0 → jn<0
     let jt = -vt / kt;

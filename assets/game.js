@@ -76,6 +76,9 @@ scene.add(moon);
 // ---------- 赛道世界组 (切赛道时整体重建) ----------
 let trackGroup = new THREE.Group();
 scene.add(trackGroup);
+let trackModel = null;
+let trackModelLoadToken = 0;
+let trackModelLoading = false;
 
 // 应用赛道环境 (光照/天空/雾/地面色/车头灯)
 function applyEnv(env){
@@ -1519,7 +1522,7 @@ function buildDesert(){
   trackGroup.add(grp);
 }
 
-function buildTrackWorld(trackDef){
+function buildProceduralTrackWorld(trackDef){
   computeTrackData(trackDef);
   // pit 参数 (isInPitLane/isPitGap/pitLaneWallCollision 读这些变量)
   const pit = trackDef.pit;
@@ -1558,6 +1561,9 @@ function buildTrackWorld(trackDef){
 }
 
 function disposeTrackWorld(){
+  ++trackModelLoadToken;
+  trackModel = null;
+  trackModelLoading = false;
   if(!trackGroup) return;
   scene.remove(trackGroup);
   trackGroup.traverse(o=>{
@@ -1575,6 +1581,70 @@ function disposeTrackWorld(){
   });
   if(scene.userData.flyer) delete scene.userData.flyer;
   trackGroup = new THREE.Group();
+}
+
+function configureImportedTrack(root, trackDef){
+  const cfg = trackDef.model;
+  root.position.set(...cfg.position);
+  root.scale.set(...cfg.scale);
+  root.rotation.y = cfg.rotationY || 0;
+  root.traverse(o=>{
+    if(!o.isMesh) return;
+    o.castShadow = false;
+    o.receiveShadow = true;
+    if(o.material){
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for(const m of mats){
+        if(m.map) m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+        if('envMapIntensity' in m) m.envMapIntensity = 0.55;
+      }
+    }
+  });
+  // GLB 就绪后隐藏程序化视觉层，保留其路点碰撞/AI 数据作为稳定的物理基准。
+  for(const child of trackGroup.children){
+    if(child !== root) child.visible = false;
+  }
+  trackGroup.add(root);
+  trackModel = root;
+  trackModelLoading = false;
+}
+
+function showTrackModelStatus(text, error=false){
+  if(!ui.msg || !ui.msg1 || !ui.msg2) return;
+  ui.msg.style.display = 'block';
+  ui.msg1.textContent = error ? 'TRACK FALLBACK' : 'LOADING TRACK';
+  ui.msg2.textContent = text;
+  if(error) ui.msg.style.borderLeftColor = '#ffd747';
+  window.setTimeout(()=>{ if(ui.msg1.textContent === (error ? 'TRACK FALLBACK' : 'LOADING TRACK')) ui.msg.style.display='none'; }, error ? 5000 : 2500);
+}
+
+function loadImportedTrack(trackDef){
+  if(!trackDef.model || typeof THREE.GLTFLoader !== 'function') return false;
+  const token = ++trackModelLoadToken;
+  const loader = new THREE.GLTFLoader();
+  trackModelLoading = true;
+  showTrackModelStatus('正在载入滨海湾夜景模型…');
+  loader.load(trackDef.model.path, gltf=>{
+    if(token !== trackModelLoadToken || currentTrack !== trackDef){
+      gltf.scene.traverse(o=>{ if(o.geometry) o.geometry.dispose(); });
+      return;
+    }
+    configureImportedTrack(gltf.scene, trackDef);
+    showTrackModelStatus('滨海湾 3D 夜景已就绪');
+  }, undefined, err=>{
+    if(token !== trackModelLoadToken) return;
+    trackModelLoading = false;
+    console.warn('Marina Bay GLB unavailable; using procedural fallback.', err);
+    showTrackModelStatus('模型加载失败，已切换为内置赛道', true);
+  });
+  return true;
+}
+
+function buildTrackWorld(trackDef){
+  computeTrackData(trackDef);
+  // 即使 GLB 正在异步加载，也先建立可玩的二维碰撞/程序化回退场景。
+  buildProceduralTrackWorld(trackDef);
+  if(trackDef.model) loadImportedTrack(trackDef);
 }
 
 // 初始构建 (默认赛道)
@@ -1768,19 +1838,35 @@ function getCarCorners(c){
   return result;
 }
 
+// 将车辆位移拆成有限步长，避免高速车辆一帧跨过赛道边界。
+// 每一步都重新计算车身角点，兼容维修区开口和普通赛道护墙。
+function moveCarWithCollision(c, dt){
+  if(!c || !c.velocity || !isFinite(dt) || dt <= 0) return {seg:nearestSegment(c.pos), hit:false};
+  const distance = Math.hypot(c.velocity.x, c.velocity.z) * dt;
+  const steps = Math.min(12, Math.max(1, Math.ceil(distance / 0.65)));
+  const stepDt = dt / steps;
+  let result = null;
+  for(let i=0; i<steps; i++){
+    c.pos.addScaledVector(c.velocity, stepDt);
+    result = barrierCollision(c, !c._lastHit && (!result || !result.hit));
+    if(isNaN(c.pos.x) || isNaN(c.pos.z)) break;
+  }
+  return result || {seg:nearestSegment(c.pos), hit:false};
+}
+
 // 维修通道侧壁碰撞: 与赛道墙一致的冲量物理, 但用通道自己的边界
-function pitLaneWallCollision(c){
+function pitLaneWallCollision(c, allowImpulse=true){
   const Z_OUT = PIT_LANE_Z - PIT_LANE_HALF_W; // 313 外墙 (维修站一侧)
   const Z_IN  = PIT_LANE_Z + PIT_LANE_HALF_W; // 323 内墙 (赛道一侧)
   let touched = false, maxVn = 0;
   for(const corner of getCarCorners(c)){
     if(corner.z < Z_OUT){
       // 外墙: 法线 +z (推回通道)
-      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, 1, Z_OUT - corner.z);
+      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, 1, Z_OUT - corner.z, allowImpulse);
       if(res){ touched = true; maxVn = Math.max(maxVn, Math.abs(res.vn)); }
     } else if(corner.z > Z_IN && !isPitGap(corner.x, corner.z)){
       // 内墙 (非开口段): 法线 -z (推回通道)
-      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, -1, corner.z - Z_IN);
+      const res = Physics2D.wallResolve(c, corner.x, corner.z, 0, -1, corner.z - Z_IN, allowImpulse);
       if(res){ touched = true; maxVn = Math.max(maxVn, Math.abs(res.vn)); }
     }
   }
@@ -1799,7 +1885,7 @@ function pitLaneWallCollision(c){
   }
 }
 
-function barrierCollision(c){
+function barrierCollision(c, allowImpulse=true){
   let hit=false;
   let seg = nearestSegment(c.pos);
   c.sampleIdx = seg.i;
@@ -1807,7 +1893,7 @@ function barrierCollision(c){
   // 在维修通道内不执行赛道围栏碰撞 (允许车辆驶入维修区); 进站车仍在主赛道时保持正常碰撞, 防止穿墙
   if(isInPitLane(c.pos)){
     // 维修通道两侧围墙: 真实的柔和碰撞 (防止高速冲出通道被隐形边界猛烈弹回)
-    pitLaneWallCollision(c);
+    pitLaneWallCollision(c, allowImpulse);
     c._lastHit = false;
     c.offTrack = false;
     return { seg, hit: false };
@@ -1852,7 +1938,7 @@ function barrierCollision(c){
     const nx = -pushSign * pushNormal.x, nz = -pushSign * pushNormal.z;
 
     // === 物理引擎: 单点接触冲量 (Physics2D, 含偏航力矩) ===
-    const res = Physics2D.wallResolve(c, collisionPoint.x, collisionPoint.z, nx, nz, maxOvershoot);
+    const res = Physics2D.wallResolve(c, collisionPoint.x, collisionPoint.z, nx, nz, maxOvershoot, allowImpulse);
 
     // 二次验证: 残留穿透直接位置推出 (速度已由冲量求解)
     for(let iter=0; iter<3; iter++){
@@ -1958,14 +2044,13 @@ function updatePlayer(dt){
       c.reverseTimer=(c.reverseTimer||0)+dt;
       if(c.reverseTimer>0.4 && !c.inReverse){ c.inReverse=true; flashMsg('REVERSE','倒车模式'); }
     }
-    c.pos.addScaledVector(c.velocity, dt);
+    moveCarWithCollision(c, dt);
     // NaN保护
     if(isNaN(c.pos.x)||isNaN(c.pos.z)){
       resetPlayerToTrack();
       c.collisionLock = 0;
       return;
     }
-    barrierCollision(c);
     applyMesh(c);
     updateProgress(c, dt);
     return;
@@ -1976,8 +2061,7 @@ function updatePlayer(dt){
   }
   // 离地/翻车: 无驱动抓地力, 按弹道滑行 (3D 姿态由 integrate3D 积分)
   if(c.airborne || c.flipped || c.y > 0){
-    c.pos.addScaledVector(c.velocity, dt);
-    barrierCollision(c);
+    moveCarWithCollision(c, dt);
     applyMesh(c);
     updateProgress(c, dt);
     return;
@@ -2143,23 +2227,8 @@ function updatePlayer(dt){
   const driftBase = THREE.MathUtils.clamp(0.15 + v * 0.002, 0.12, 0.42);
   const driftFactor = driftBase * Math.max(0.5, effectiveGrip * 0.8);
   c.velocity.lerp(desired, Math.min(driftFactor * dt * 60, 1)); // 帧率无关
-  c.pos.addScaledVector(c.velocity,dt);
+  moveCarWithCollision(c, dt);
 
-  // 围栏硬碰撞 (冲不出去) — 第一次碰撞处理
-  barrierCollision(c);
-  // 二次防穿模: 检查所有角点, 任何穿透则推回 (维修区开口豁免)
-  {
-    const corners2 = getCarCorners(c);
-    let worstOV = 0, worstN = null, worstS = 0;
-    for(const cr of corners2){
-      if(isPitGap(cr.x, cr.z)) continue;
-      const cs = nearestSegment(cr);
-      if(cs.absLat > WALL_DIST){ const ov = cs.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = cs.normal; worstS = Math.sign(cs.lateral); } }
-    }
-    const csC = nearestSegment(c.pos);
-    if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
-    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (Math.min(worstOV, 1.0) + 0.05)); // 限幅防大力弹射
-  }
 
   // 齿轮 / RPM (基于真实换挡曲线)
   const gearRange=Math.max(1e-6, c.maxSpeed/8); // 除零防护
@@ -2197,7 +2266,7 @@ function updateAI(c, dt){
     c.speed = c.velocity.length() * Math.sign(c.speed || 1);
     c.collisionSpin *= Math.max(0, 1 - 3.0*dt);
     c.heading += c.collisionSpin * dt * 0.3;
-    c.pos.addScaledVector(c.velocity, dt);
+    moveCarWithCollision(c, dt);
     // NaN保护
     if(isNaN(c.pos.x)||isNaN(c.pos.z)){
       const rp=racingLinePoint(c.sampleIdx||0);
@@ -2205,7 +2274,6 @@ function updateAI(c, dt){
       c.speed=0; c.velocity.set(0,0,0);
       c.collisionLock = 0;
     }
-    barrierCollision(c);
     applyMesh(c);
     updateProgress(c, dt);
     return;
@@ -2220,16 +2288,14 @@ function updateAI(c, dt){
     c.speed = Math.max(0, c.speed - 20 * dt);
     const ffwd = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
     c.velocity.copy(ffwd).multiplyScalar(c.speed);
-    c.pos.addScaledVector(c.velocity, dt);
-    barrierCollision(c);
+    moveCarWithCollision(c, dt);
     applyMesh(c);
     updateProgress(c, dt);
     return;
   }
   // 离地/翻车: 无驱动抓地力, 按弹道滑行 (3D 姿态由 integrate3D 积分)
   if(c.airborne || c.flipped || c.y > 0){
-    c.pos.addScaledVector(c.velocity, dt);
-    barrierCollision(c);
+    moveCarWithCollision(c, dt);
     applyMesh(c);
     updateProgress(c, dt);
     return;
@@ -2337,8 +2403,7 @@ function updateAI(c, dt){
     // 进站期间: 移动 + 碰撞 + 渲染 (跳过正常巡航逻辑)
     const fwd = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
     c.velocity.copy(fwd).multiplyScalar(c.speed);
-    c.pos.addScaledVector(c.velocity, dt);
-    barrierCollision(c);
+    moveCarWithCollision(c, dt);
     applyMesh(c);
     updateProgress(c, dt);
     return;
@@ -2570,21 +2635,8 @@ function updateAI(c, dt){
   // === 移动 + 碰撞 ===
   const fwd=new THREE.Vector3(Math.sin(c.heading),0,Math.cos(c.heading));
   c.velocity.copy(fwd).multiplyScalar(c.speed);
-  c.pos.addScaledVector(c.velocity,dt);
-  const collResult=barrierCollision(c);
-  // 二次防穿模: 检查所有角点, 任何穿透则推回 (维修区开口豁免)
-  {
-    const corners2 = getCarCorners(c);
-    let worstOV = 0, worstN = null, worstS = 0;
-    for(const cr of corners2){
-      if(isPitGap(cr.x, cr.z)) continue;
-      const cs = nearestSegment(cr);
-      if(cs.absLat > WALL_DIST){ const ov = cs.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = cs.normal; worstS = Math.sign(cs.lateral); } }
-    }
-    const csC = nearestSegment(c.pos);
-    if(!isPitGap(c.pos.x, c.pos.z) && csC.absLat > WALL_DIST){ const ov = csC.absLat - WALL_DIST; if(ov > worstOV){ worstOV = ov; worstN = csC.normal; worstS = Math.sign(csC.lateral); } }
-    if(worstOV > 0) c.pos.addScaledVector(worstN, -worstS * (Math.min(worstOV, 1.0) + 0.05)); // 限幅防大力弹射
-  }
+  const collResult=moveCarWithCollision(c, dt);
+
   // 撞墙: 仅在重撞时触发恢复模式, 轻擦则继续滑行
   if(collResult&&collResult.hit){
     // 仅在 crashTimer 触发(高速重撞)时进入恢复, 轻擦不中断巡航

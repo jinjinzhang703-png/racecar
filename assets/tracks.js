@@ -11,6 +11,15 @@ const TRACKS = [
     desc: '街道赛 · 19弯 · 逆时针 · 夜赛',
     available: true,
     scenery: 'city',
+    // Blender 导出的主视觉赛道；碰撞仍使用下方同坐标系的二维路点。
+    model: {
+      path: 'assets/models/marina_bay_street_circuit.glb',
+      // Blender 场景的水平轴映射到 Three.js 的 X/Z 平面。
+      position: [-70, 0.05, 100],
+      // glTF 导出会把 Blender 的水平 Y 轴映射到 Three.js 的 Z 轴；比例与现有路点范围一致。
+      scale: [0.41, 0.41, 0.54],
+      rotationY: 0,
+    },
     props: ['tunnel', 'flyer', 'mbs', 'water'],
     // 观众席 [x, z, rotY]
     grandstands: [
