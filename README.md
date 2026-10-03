@@ -4,9 +4,9 @@
 
 ## 在线访问
 
-推送到 `main` 后，GitHub Pages 工作流会自动发布静态网站：
+静态网站已发布到 Cloudflare Pages：
 
-- `https://jinjinzhang703-png.github.io/racecar/`
+- `https://racecar-ex4.pages.dev/`
 
 打开网站即可游玩，不需要 `localhost`、Blender 或 Node.js。第一次进入滨海湾赛道时会加载约 16 MB 的 GLB 资源；如果资源加载失败，游戏会自动回退到内置程序化赛道。
 
