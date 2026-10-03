@@ -14,12 +14,14 @@ const TRACKS = [
     // Blender 导出的主视觉赛道；碰撞仍使用下方同坐标系的二维路点。
     model: {
       path: 'assets/models/marina_bay_street_circuit.glb',
-      // Blender 场景的水平轴映射到 Three.js 的 X/Z 平面。
-      position: [-70, 0.05, 100],
-      // glTF 导出会把 Blender 的水平 Y 轴映射到 Three.js 的 Z 轴；比例与现有路点范围一致。
-      scale: [0.41, 0.41, 0.54],
-      rotationY: 0,
+      // 与 assets/marina-route.js 同一套 Blender→Three.js 变换：保持 X/Z 等比例。
+      position: [-332.374, 0.05, -65.925],
+      scale: [1, 1, 1],
+      rotationY: Math.PI/2,
     },
+    roadWidth: MARINA_MODEL_ROUTE.roadWidth,
+    wallOffset: MARINA_MODEL_ROUTE.wallOffset,
+    modelRoute: true,
     props: ['tunnel', 'flyer', 'mbs', 'water'],
     // 观众席 [x, z, rotY]
     grandstands: [
@@ -31,11 +33,9 @@ const TRACKS = [
       [-120, 160, 0],            // T12附近
     ],
 
-    // 发车格: gx = x + slot*slotDx, gz = z + (slot%2)*stagger - stagger/2
-    grid: { x: -300, z: 340, slotDx: 20, stagger: 4, heading: Math.PI/2 },
-    // 维修区 (与游戏内现有坐标一致)
-    pit: { laneZ: 318, laneHalfW: 5, entryX: -340, exitX: 40,
-           gaps: [[-360, -295], [0, 60]], speedLimit: 22 },
+    // 发车格和维修区直接来自模型路线元数据。
+    grid: MARINA_MODEL_ROUTE.grid,
+    pit: MARINA_MODEL_ROUTE.pit,
     // 夜赛环境
     env: {
       night: true,

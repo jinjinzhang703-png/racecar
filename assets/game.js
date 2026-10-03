@@ -101,9 +101,16 @@ function applyEnv(env){
 let currentTrack = TRACKS.find(t=>t.available) || TRACKS[0];
 let WP, CORNER_NAMES, N_WP, S1_END, S2_END, DRS_ZONES, PIT_ZONE;
 let waypoints, curve;
-const ROAD_W = 16, HALF_W = ROAD_W/2;
-const WALL_OFFSET = 0.8;  // 围栏距赛道边 (视觉与碰撞统一)
-const WALL_DIST = HALF_W + WALL_OFFSET; // =8.8, 视觉与碰撞共用
+let ROAD_W = 16, HALF_W = ROAD_W/2;
+let WALL_OFFSET = 0.8;
+let WALL_DIST = HALF_W + WALL_OFFSET;
+
+function applyTrackDimensions(trackDef){
+  ROAD_W = Number.isFinite(trackDef.roadWidth) ? trackDef.roadWidth : 16;
+  HALF_W = ROAD_W / 2;
+  WALL_OFFSET = Number.isFinite(trackDef.wallOffset) ? trackDef.wallOffset : 0.8;
+  WALL_DIST = HALF_W + WALL_OFFSET;
+}
 const NSAMP = 600;
 const SAMPLES = [];
 const TANGENTS = [];
@@ -113,13 +120,26 @@ const CURVATURE = [];
 
 function computeTrackData(trackDef){
   currentTrack = trackDef;
-  WP = trackDef.wp;
-  CORNER_NAMES = trackDef.cornerNames;
+  applyTrackDimensions(trackDef);
+  WP = trackDef.modelRoute && typeof MARINA_MODEL_ROUTE !== 'undefined'
+    ? MARINA_MODEL_ROUTE.wp.map(p=>[p[0],p[1]])
+    : trackDef.wp;
+  // 模型派生路线的点数与旧手写路线不同；让弯道标牌使用自动检测的 T 编号，避免沿用错误索引。
+  CORNER_NAMES = trackDef.modelRoute ? {} : trackDef.cornerNames;
   N_WP = WP.length;
-  S1_END = trackDef.sectorEnds[0]/N_WP;
-  S2_END = trackDef.sectorEnds[1]/N_WP;
-  DRS_ZONES = trackDef.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
-  PIT_ZONE = trackDef.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
+  const sectorFractions = trackDef.modelRoute && trackDef.sectorFractions
+    ? trackDef.sectorFractions
+    : [trackDef.sectorEnds[0]/N_WP, trackDef.sectorEnds[1]/N_WP];
+  S1_END = sectorFractions[0];
+  S2_END = sectorFractions[1];
+  const drsFractions = trackDef.modelRoute && trackDef.drsFractions
+    ? trackDef.drsFractions
+    : trackDef.drsZones.map(z=>[z[0]/N_WP, z[1]/N_WP]);
+  DRS_ZONES = drsFractions.map(z=>[z[0], z[1]]);
+  const pitFractions = trackDef.modelRoute && trackDef.pitFractions
+    ? trackDef.pitFractions
+    : trackDef.pitZone.map(z=>[z[0]/N_WP, z[1]===null?1.0:z[1]/N_WP]);
+  PIT_ZONE = pitFractions.map(z=>[z[0], z[1]]);
 
   // 构建闭合曲线
   waypoints = WP.map(p=>new THREE.Vector3(p[0],0,p[1]));
@@ -381,12 +401,18 @@ let PIT_LANE_Z = 318;       // 维修通道中心 z 坐标
 let PIT_LANE_HALF_W = 5;    // 维修通道半宽 (10m 宽)
 let PIT_ENTRY_X = -340;     // 入口 x 坐标
 let PIT_EXIT_X = 40;        // 出口 x 坐标
+let PIT_ENTRY_MAIN_Z = 340; // 模型赛道侧入口高度
+let PIT_EXIT_MAIN_Z = 340;  // 模型赛道侧出口高度
 let PIT_SPEED_LIMIT = 22;   // 80 km/h ≈ 22 m/s
 // 赛道围墙上的维修区开口 (视觉与碰撞共用)
 let PIT_WALL_GAPS = [ [-360, -295], [0, 60] ];
 // 位置是否处于维修区围墙开口 (主直道→维修通道之间 + 缺口 x 区间)
 function isPitGap(x, z){
-  if(z < 316 || z > 346) return false;
+  const mainLo = Math.min(PIT_ENTRY_MAIN_Z, PIT_EXIT_MAIN_Z) - 14;
+  const mainHi = Math.max(PIT_ENTRY_MAIN_Z, PIT_EXIT_MAIN_Z) + 14;
+  const laneLo = PIT_LANE_Z - PIT_LANE_HALF_W - 3;
+  const laneHi = PIT_LANE_Z + PIT_LANE_HALF_W + 3;
+  if(z < Math.min(mainLo, laneLo) || z > Math.max(mainHi, laneHi)) return false;
   for(const [a, b] of PIT_WALL_GAPS){ if(x > a && x < b) return true; }
   return false;
 }
@@ -671,24 +697,24 @@ function buildPitLane(){
   const entryShape = new THREE.Shape();
   entryShape.moveTo(0, 0);
   entryShape.lineTo(-30, 0);
-  entryShape.lineTo(-10, -(340 - PIT_LANE_Z - PIT_LANE_HALF_W));
-  entryShape.lineTo(0, -(340 - PIT_LANE_Z - PIT_LANE_HALF_W));
+  entryShape.lineTo(-10, -(PIT_ENTRY_MAIN_Z - PIT_LANE_Z - PIT_LANE_HALF_W));
+  entryShape.lineTo(0, -(PIT_ENTRY_MAIN_Z - PIT_LANE_Z - PIT_LANE_HALF_W));
   const entryGeo = new THREE.ShapeGeometry(entryShape);
   const entryMesh = new THREE.Mesh(entryGeo, new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.7 }));
   entryMesh.rotation.x = -Math.PI / 2;
-  entryMesh.position.set(PIT_ENTRY_X, 0.015, 340);
+  entryMesh.position.set(PIT_ENTRY_X, 0.015, PIT_ENTRY_MAIN_Z);
   pitGroup.add(entryMesh);
 
   // 出口斜道
   const exitShape = new THREE.Shape();
   exitShape.moveTo(0, 0);
   exitShape.lineTo(30, 0);
-  exitShape.lineTo(10, -(340 - PIT_LANE_Z - PIT_LANE_HALF_W));
-  exitShape.lineTo(0, -(340 - PIT_LANE_Z - PIT_LANE_HALF_W));
+  exitShape.lineTo(10, -(PIT_ENTRY_MAIN_Z - PIT_LANE_Z - PIT_LANE_HALF_W));
+  exitShape.lineTo(0, -(PIT_ENTRY_MAIN_Z - PIT_LANE_Z - PIT_LANE_HALF_W));
   const exitGeo = new THREE.ShapeGeometry(exitShape);
   const exitMesh = new THREE.Mesh(exitGeo, new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.7 }));
   exitMesh.rotation.x = -Math.PI / 2;
-  exitMesh.position.set(PIT_EXIT_X, 0.015, 340);
+  exitMesh.position.set(PIT_EXIT_X, 0.015, PIT_EXIT_MAIN_Z);
   pitGroup.add(exitMesh);
 
   // === 内侧墙 (靠近赛道一侧, z=323) — 分段建造, 留出入口/出口开口 ===
@@ -819,7 +845,7 @@ function buildPitLane(){
     new THREE.PlaneGeometry(1.5, 1.5),
     new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.5 })
   );
-  signMesh.position.set(PIT_ENTRY_X + 5, 2.5, PIT_LANE_Z + PIT_LANE_HALF_W + 0.5);
+  signMesh.position.set(PIT_ENTRY_X + 5, 2.5, PIT_ENTRY_MAIN_Z + 0.5);
   signMesh.rotation.y = -Math.PI / 2;
   pitGroup.add(signMesh);
 
@@ -849,14 +875,14 @@ function isInPitLane(pos){
      pos.z > PIT_LANE_Z - PIT_LANE_HALF_W - 8 && pos.z < PIT_LANE_Z + PIT_LANE_HALF_W + 7){
     return true;
   }
-  // 入口斜道范围 (从赛道 z=340 到通道 z=323)
+  // 入口斜道范围 (从模型赛道入口到维修通道)
   if(pos.x > PIT_ENTRY_X - 20 && pos.x < PIT_ENTRY_X + 35 &&
-     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < 342){
+     pos.z > Math.min(PIT_LANE_Z + PIT_LANE_HALF_W, PIT_ENTRY_MAIN_Z) && pos.z < Math.max(PIT_LANE_Z + PIT_LANE_HALF_W, PIT_ENTRY_MAIN_Z) + 2){
     return true;
   }
   // 出口斜道范围
   if(pos.x > PIT_EXIT_X - 35 && pos.x < PIT_EXIT_X + 20 &&
-     pos.z > PIT_LANE_Z + PIT_LANE_HALF_W && pos.z < 342){
+     pos.z > Math.min(PIT_LANE_Z + PIT_LANE_HALF_W, PIT_EXIT_MAIN_Z) && pos.z < Math.max(PIT_LANE_Z + PIT_LANE_HALF_W, PIT_EXIT_MAIN_Z) + 2){
     return true;
   }
   return false;
@@ -1528,6 +1554,8 @@ function buildProceduralTrackWorld(trackDef){
   const pit = trackDef.pit;
   PIT_LANE_Z = pit.laneZ; PIT_LANE_HALF_W = pit.laneHalfW;
   PIT_ENTRY_X = pit.entryX; PIT_EXIT_X = pit.exitX;
+  PIT_ENTRY_MAIN_Z = pit.entryMainZ || 340;
+  PIT_EXIT_MAIN_Z = pit.exitMainZ || 340;
   PIT_SPEED_LIMIT = pit.speedLimit;
   PIT_WALL_GAPS = pit.gaps.map(g=>[...g]);
   // 环境 (光照/天空/雾/车头灯)
@@ -1726,8 +1754,13 @@ function makeCar(isPlayer, gridSlot){
   }
   // 发车位: 由赛道 grid 配置决定
   const gd = currentTrack.grid;
-  const gx = gd.x + gridSlot*gd.slotDx;
-  const gz = gd.z + (gridSlot%2)*gd.stagger - gd.stagger/2;
+  const forwardX = Math.sin(gd.heading);
+  const forwardZ = Math.cos(gd.heading);
+  const lateralX = Math.cos(gd.heading);
+  const lateralZ = -Math.sin(gd.heading);
+  const stagger = (gridSlot%2)*gd.stagger - gd.stagger/2;
+  const gx = gd.x + gridSlot*gd.slotDx*forwardX + stagger*lateralX;
+  const gz = gd.z + gridSlot*gd.slotDx*forwardZ + stagger*lateralZ;
   return {
     mesh, marker, isPlayer, team,
     name:team.driver, num:team.num, teamName:team.name,
@@ -2325,7 +2358,7 @@ function updateAI(c, dt){
       const inWindow = c.pos.x < PIT_ENTRY_X + 35;
       const entryTarget = inWindow
         ? new THREE.Vector3(PIT_ENTRY_X + 20, 0, PIT_LANE_Z) // 窗口内: 向北驶入通道
-        : new THREE.Vector3(PIT_ENTRY_X + 20, 0, 340);        // 未到: 沿赛道驶向窗口
+        : new THREE.Vector3(PIT_ENTRY_X + 20, 0, PIT_ENTRY_MAIN_Z); // 未到: 沿模型赛道驶向窗口
       const dx = entryTarget.x - c.pos.x;
       const dz = entryTarget.z - c.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -2377,7 +2410,7 @@ function updateAI(c, dt){
       }
     } else if(c.pitPhase === 'exiting'){
       // 阶段4: 从维修通道驶出, 回到主赛道 (目标设在赛道中心 z=340)
-      const exitTarget = new THREE.Vector3(PIT_EXIT_X + 10, 0, 340);
+      const exitTarget = new THREE.Vector3(PIT_EXIT_X + 10, 0, PIT_EXIT_MAIN_Z);
       const dx = exitTarget.x - c.pos.x;
       const dz = exitTarget.z - c.pos.z;
       const dist = Math.hypot(dx, dz);
@@ -2392,7 +2425,7 @@ function updateAI(c, dt){
         c.speed = Math.max(PIT_SPEED_LIMIT, c.speed - 30 * dt);
       }
       // 离开维修通道并接近主赛道
-      if(!isInPitLane(c.pos) && c.pos.z > 330){
+      if(!isInPitLane(c.pos) && c.pos.z > PIT_EXIT_MAIN_Z - 10){
         c.pitting = false;
         c.pitPhase = null;
         c._pitEntryTimer = 0;
