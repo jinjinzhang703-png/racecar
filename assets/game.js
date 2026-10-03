@@ -252,12 +252,17 @@ function buildRoad(){
   g.setIndex(idx); g.computeVertexNormals();
   const asphaltTex=generateAsphaltTexture();
   const m=new THREE.MeshStandardMaterial({
-    color:0x2a2a30, map:asphaltTex,
-    roughness:0.55,    // 提高粗糙度, 降低镜面反射 (原0.25)
+    color:0x34363d, map:asphaltTex,
+    roughness:0.72,
+    depthWrite:true,
+    polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,    // 提高粗糙度, 降低镜面反射 (原0.25)
     metalness:0.05,    // 微降金属感 (原0.5)
     envMapIntensity:0.6 // 降低环境反射 ~40% (原1.0)
   });
-  const mesh=new THREE.Mesh(g,m); mesh.receiveShadow=true; return mesh;
+  const mesh=new THREE.Mesh(g,m);
+  mesh.receiveShadow=true;
+  mesh.userData.proceduralRoad=true;
+  return mesh;
 }
 // 由 buildTrackWorld 调用
 
@@ -274,7 +279,9 @@ function buildEdge(side){
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   g.setIndex(idx); g.computeVertexNormals();
-  return new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xe0e0e0,roughness:0.5,emissive:0x404040,emissiveIntensity:0.3}));
+  const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xe0e0e0,roughness:0.5,emissive:0x404040,emissiveIntensity:0.3}));
+  mesh.userData.proceduralRoadEdge=true;
+  return mesh;
 }
 // 由 buildTrackWorld 调用
 
@@ -289,6 +296,7 @@ function buildCenter(){
     m.rotation.y=ry;
     grp.add(m);
   }
+  grp.userData.proceduralCenter=true;
   return grp;
 }
 // 由 buildTrackWorld 调用
@@ -1491,8 +1499,11 @@ function buildGround(){
     new THREE.PlaneGeometry(8000,8000),
     new THREE.MeshStandardMaterial({ color: currentTrack.env.ground, roughness:0.85, metalness:0.1 })
   );
-  ground.rotation.x = -Math.PI/2; ground.position.y = -0.05;
+  ground.rotation.x = -Math.PI/2;
+  // Keep the model road and the visible low-poly fallback above the city ground.
+  ground.position.y = currentTrack.modelRoute ? -0.30 : -0.05;
   ground.receiveShadow = true;
+  ground.userData.proceduralGround=true;
   trackGroup.add(ground);
 }
 
@@ -1613,25 +1624,51 @@ function disposeTrackWorld(){
 
 function configureImportedTrack(root, trackDef){
   const cfg = trackDef.model;
-  root.position.set(...cfg.position);
-  root.scale.set(...cfg.scale);
-  root.rotation.y = cfg.rotationY || 0;
+  if(cfg.basis === 'blender-ground'){
+    // Blender asset uses X/Y as ground and Z as height. Map it to Three.js:
+    // gameX=-sourceY+tx, gameY=sourceZ+ty, gameZ=sourceX+tz.
+    const s = cfg.scale[0];
+    const [tx, ty, tz] = cfg.position;
+    root.matrixAutoUpdate = false;
+    root.matrix.set(
+      0, -s, 0, tx,
+      0, 0, s, ty,
+      s, 0, 0, tz,
+      0, 0, 0, 1
+    );
+    root.updateMatrixWorld(true);
+  } else {
+    root.position.set(...cfg.position);
+    root.scale.set(...cfg.scale);
+    root.rotation.y = cfg.rotationY || 0;
+  }
   root.traverse(o=>{
     if(!o.isMesh) return;
     o.castShadow = false;
     o.receiveShadow = true;
+    o.frustumCulled = true;
     if(o.material){
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for(const m of mats){
+        // The exported road has mirrored/converted winding in some Blender collections.
+        // DoubleSide keeps the asphalt and kerbs visible from the driving camera.
+        m.side = THREE.DoubleSide;
+        m.transparent = false;
+        m.depthWrite = true;
         if(m.map) m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
         if('envMapIntensity' in m) m.envMapIntensity = 0.55;
+        m.needsUpdate = true;
       }
     }
   });
-  // GLB 就绪后隐藏程序化视觉层，保留其路点碰撞/AI 数据作为稳定的物理基准。
+  // 保留同源的低模道路作为可见保底层：即使 GLB 材质/剔除异常，玩家仍能看到并驾驶赛道。
   for(const child of trackGroup.children){
-    if(child !== root) child.visible = false;
+    if(child === root) continue;
+    const keepRoad = child.userData && (child.userData.proceduralRoad || child.userData.proceduralRoadEdge || child.userData.proceduralCenter || child.userData.proceduralGround);
+    child.visible = !!keepRoad;
+    if(keepRoad && child.userData.proceduralRoad) child.position.y = -0.04;
   }
+  root.userData.importedMarinaTrack = true;
   trackGroup.add(root);
   trackModel = root;
   trackModelLoading = false;

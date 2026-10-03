@@ -17,7 +17,7 @@ const TRACKS = [
       // 与 assets/marina-route.js 同一套 Blender→Three.js 变换：保持 X/Z 等比例。
       position: [-332.374, 0.05, -65.925],
       scale: [1, 1, 1],
-      rotationY: Math.PI/2,
+      basis: 'blender-ground',
     },
     roadWidth: MARINA_MODEL_ROUTE.roadWidth,
     wallOffset: MARINA_MODEL_ROUTE.wallOffset,
