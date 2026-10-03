@@ -21,7 +21,7 @@
   <div class="cards">
     <div class="card"><div class="v bad">P0 · 0</div><div class="l">需要优先修复</div></div>
     <div class="card"><div class="v warn">P1 · 3</div><div class="l">影响比例/观感/性能</div></div>
-    <div class="card"><div class="v">16.7 MB</div><div class="l">GLB 传输体积</div></div>
+    <div class="card"><div class="v">18.6 MB</div><div class="l">GLB 传输体积</div></div>
     <div class="card"><div class="v">67.6 m</div><div class="l">路点到模型最近中心的平均偏差</div></div>
     <div class="card"><div class="v">168.2 m</div><div class="l">最大路点偏差</div></div>
   </div>
@@ -41,7 +41,7 @@
     <tr><td>GEO-005</td><td><span class="sev p1">P1</span></td><td>维修区</td><td>维修区现在使用模型 A3_PitLane 元数据：laneZ≈576.7、入口/出口和 gap 同步生成；模型的 A3_PitLane 与主 TrackSurface 没有完成同坐标拟合。</td><td>进站入口、内墙开口、维修位建筑可能与模型车道错位，出现斜插、悬空或穿过玻璃/墙体。</td><td>由模型 PitLane 网格生成 lane 中线、半宽、入口、出口和 gap；验收：进站 20 次，车辆四角不穿内外墙，入口/出口与可见开口重合。</td><td class="status ok">已同步元数据；需人工进站复测</td></tr>
     <tr><td>GEO-006</td><td><span class="sev p1">P1</span></td><td>城市建筑比例</td><td>导出选择包含 MarinaBay_City、Landmarks、Props、StartUpgrade 等大量场景集合；场景总导出对象约 <b>1342 个 mesh node</b>。当前没有独立的“赛车可比尺寸”标尺或人形/车辆锚点。</td><td>金沙、摩天轮、看台、灯杆与 F1 车辆的相对尺寸无法由代码保证；建筑可能过大、过小或离道路过远。</td><td>Blender 场景加入 5.85 m 车辆代理、1.8 m 人形、道路 16 m 标尺；验收：主看台、灯杆、地标相对车辆比例由代理测量，并在导出前冻结变换。</td><td class="status warn">需人工视觉验收</td></tr>
     <tr><td>GEO-007</td><td><span class="sev p1">P1</span></td><td>垂直高度</td><td>游戏车辆物理使用 y=0 平面并通过 `y/airborne` 做简化跳跃；GLB 路面高度、路缘高度、护墙顶部和坡度没有被提取到碰撞系统。</td><td>车辆可能贴地穿过路缘、桥面/坡道与模型发生高度穿模；摄像机看到的高低差与车辆物理不一致。</td><td>从 TrackSurface 生成简化高度采样，或明确将模型道路烘焙为 y=0 平面；验收：坡道/路缘垂直误差 &lt; 0.15 m，车轮不悬空。</td><td class="status warn">未纳入 3D 碰撞</td></tr>
-    <tr><td>GEO-008</td><td><span class="sev p2">P2</span></td><td>材质 / 贴图</td><td>GLB 内含大量嵌入材质与贴图，线上资源约 16.7 MB；当前没有纹理 LOD、KTX2、Draco/Meshopt 或按距离隐藏策略。</td><td>移动端首屏加载慢、显存峰值高；大量灯光/座椅/城市细节可能造成低帧率。</td><td>合并重复材质、压缩纹理、按赛道段落拆包或启用 LOD；验收：桌面首屏模型可交互 &lt; 3 s，移动端内存/帧率达到目标设备基线。</td><td class="status warn">待优化</td></tr>
+    <tr><td>GEO-008</td><td><span class="sev p2">P2</span></td><td>材质 / 贴图</td><td>GLB 内含大量嵌入材质与贴图，线上资源约 18.6 MB；当前没有纹理 LOD、KTX2、Draco/Meshopt 或按距离隐藏策略。</td><td>移动端首屏加载慢、显存峰值高；大量灯光/座椅/城市细节可能造成低帧率。</td><td>合并重复材质、压缩纹理、按赛道段落拆包或启用 LOD；验收：桌面首屏模型可交互 &lt; 3 s，移动端内存/帧率达到目标设备基线。</td><td class="status warn">待优化</td></tr>
     <tr><td>GEO-009</td><td><span class="sev p2">P2</span></td><td>灯光 / 阴影</td><td>GLB 关闭了导入 mesh 的 castShadow，仅保留 receiveShadow；游戏同时使用程序化月光、城市灯光和模型发光材质。</td><td>模型护墙、看台和车辆的阴影关系可能不一致；夜赛视觉层次会依赖材质自发光而不是统一光照。</td><td>按对象类别开启近场阴影，远场关闭；统一色温、曝光和雾效；验收：车、护墙、看台在同一光源方向下有稳定接触阴影。</td><td class="status warn">需视觉验收</td></tr>
     <tr><td>GEO-010</td><td><span class="sev p2">P2</span></td><td>加载状态 / 回退</td><td>线上 GLB、GLTFLoader 均返回 200；失败时会保留程序化赛道回退。模型成功后通过隐藏程序化视觉组避免重叠。</td><td>回退可靠，但首次加载期间会先显示程序化场景，短暂切换可能造成视觉跳变。</td><td>加载前显示稳定遮罩或低模占位；加载完成后淡入 GLB；验收：慢网速下无双层道路、无闪烁、无未捕获异常。</td><td class="status ok">部分通过</td></tr>
     <tr><td>COL-001</td><td><span class="sev p1">P1</span></td><td>高速穿模</td><td>已加入基于位移的自适应子步，单步约 ≤ 0.65 m，并对所有车身角点重复检测；物理回归中正面撞墙不穿墙、无 NaN。</td><td>显著降低高速跨过二维边界的概率，但无法解决视觉 GLB 与二维边界错位。</td><td>模型路线校准后继续做 100 次随机高速撞墙；验收：所有车身角点始终不超过视觉边界 0.5 m。</td><td class="status ok">代码已修复，需模型对齐</td></tr>
