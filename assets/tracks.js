@@ -15,7 +15,7 @@ const TRACKS = [
     model: {
       path: 'assets/models/marina_bay_street_circuit.glb',
       // 与 assets/marina-route.js 同一套 Blender→Three.js 变换：保持 X/Z 等比例。
-      position: [-785.925, 0.05, 292.374],
+      position: [-785.925, 0.05, 387.626],
       scale: [1, 1, 1],
       basis: 'gltf-ground',
     },

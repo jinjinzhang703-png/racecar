@@ -32,6 +32,6 @@ node serve.mjs
 
 ## 资产与碰撞
 
-- `assets/models/marina_bay_street_circuit.glb`：由提供的 Blender 工程导出的浏览器模型。
+- `assets/models/marina_bay_street_circuit.glb`：由你提供的 MarinaBay_StreetCircuit_Blender 2 场景导出的浏览器模型。
 - 模型加载失败时使用原有程序化赛道，保证页面仍可玩。
 - 车辆位移现在按最大步长拆分，并在每个子步重新检测车身角点和维修区墙体，减少高速穿墙、斜向穿模和大帧间隔造成的越界。

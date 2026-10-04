@@ -1635,9 +1635,9 @@ function configureImportedTrack(root, trackDef){
       // Blender source: X/Y ground, Z height.
       root.matrix.set(0,-s,0,tx, 0,0,s,ty, s,0,0,tz, 0,0,0,1);
     } else {
-      // Exported glTF: X/Z ground, Y height. Blender source Y is stored as -Z.
-      // gameX = localX + tx; gameY = localY + ty; gameZ = -localZ + tz.
-      root.matrix.set(s,0,0,tx, 0,s,0,ty, 0,0,-s,tz, 0,0,0,1);
+      // Exported glTF already uses X/Z as the ground plane and Y as height.
+      // Keep the supplied Blender scene in its native glTF orientation.
+      root.matrix.set(s,0,0,tx, 0,s,0,ty, 0,0,s,tz, 0,0,0,1);
     }
     root.updateMatrixWorld(true);
   } else {
