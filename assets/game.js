@@ -877,6 +877,7 @@ function buildPitLane(){
 
 // 维修区检测: 判断车辆是否在维修通道内 (扩大范围, 包含入口/出口斜道)
 function isInPitLane(pos){
+  if(currentTrack && currentTrack.modelPitDisabled) return false;
   // 维修通道主体范围 (z 向外扩展, 覆盖侧壁碰撞缓冲区,
   // 防止车辆以微小穿透冲出通道落入赛道中心线碰撞)
   if(pos.x > PIT_ENTRY_X - 15 && pos.x < PIT_EXIT_X + 15 &&

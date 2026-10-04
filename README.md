@@ -8,7 +8,7 @@
 
 - `https://racecar-ex4.pages.dev/`
 
-打开网站即可游玩，不需要 `localhost`、Blender 或 Node.js。第一次进入滨海湾赛道时会加载约 16 MB 的 GLB 资源；如果资源加载失败，游戏会自动回退到内置程序化赛道。
+打开网站即可游玩，不需要 `localhost`、Blender 或 Node.js。第一次进入滨海湾赛道时会加载约 18.5 MB 的 GLB 资源；如果资源加载失败，游戏会自动回退到内置程序化赛道。
 
 ## 操作
 
