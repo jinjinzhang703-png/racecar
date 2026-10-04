@@ -1582,8 +1582,10 @@ function buildProceduralTrackWorld(trackDef){
   buildTireWalls();
   buildDebrisFence();
   buildGrandstands();
-  buildPitLane();
-  buildPitBuilding();
+  if(!trackDef.modelRoute || !trackDef.modelPitDisabled){
+    buildPitLane();
+    buildPitBuilding();
+  }
   if(trackDef.scenery === 'city'){
     trackGroup.add(buildCity());
     buildFloodlights();
@@ -1624,18 +1626,18 @@ function disposeTrackWorld(){
 
 function configureImportedTrack(root, trackDef){
   const cfg = trackDef.model;
-  if(cfg.basis === 'blender-ground'){
-    // Blender asset uses X/Y as ground and Z as height. Map it to Three.js:
-    // gameX=-sourceY+tx, gameY=sourceZ+ty, gameZ=sourceX+tz.
+  if(cfg.basis === 'blender-ground' || cfg.basis === 'gltf-ground'){
     const s = cfg.scale[0];
     const [tx, ty, tz] = cfg.position;
     root.matrixAutoUpdate = false;
-    root.matrix.set(
-      0, -s, 0, tx,
-      0, 0, s, ty,
-      s, 0, 0, tz,
-      0, 0, 0, 1
-    );
+    if(cfg.basis === 'blender-ground'){
+      // Blender source: X/Y ground, Z height.
+      root.matrix.set(0,-s,0,tx, 0,0,s,ty, s,0,0,tz, 0,0,0,1);
+    } else {
+      // Exported glTF: X/Z ground, Y height. Blender source Y is stored as -Z.
+      // gameX = localX + tx; gameY = localY + ty; gameZ = -localZ + tz.
+      root.matrix.set(s,0,0,tx, 0,s,0,ty, 0,0,-s,tz, 0,0,0,1);
+    }
     root.updateMatrixWorld(true);
   } else {
     root.position.set(...cfg.position);
@@ -2492,7 +2494,7 @@ function updateAI(c, dt){
     // 磨损率 ×1.6: 让 3-5 圈的比赛出现真实的进站窗口
     c.tire = Math.max(0, c.tire - wear * 1.6 * dt);
     c.fuel = Math.max(0, c.fuel - 0.007 * dt);
-    const inPitZone = (c.progress > 0.92 || c.progress < 0.08);
+    const inPitZone = !currentTrack.modelPitDisabled && (c.progress > 0.92 || c.progress < 0.08);
     const lapsLeft = totalLaps - c.lap;
     const strat = c.pitStrategy || 'balanced';
     let shouldPit = false;

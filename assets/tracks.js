@@ -10,19 +10,20 @@ const TRACKS = [
     sub: '滨海湾 · 新加坡夜赛',
     desc: '街道赛 · 19弯 · 逆时针 · 夜赛',
     available: true,
-    scenery: 'city',
+    scenery: 'model',
     // Blender 导出的主视觉赛道；碰撞仍使用下方同坐标系的二维路点。
     model: {
       path: 'assets/models/marina_bay_street_circuit.glb',
       // 与 assets/marina-route.js 同一套 Blender→Three.js 变换：保持 X/Z 等比例。
-      position: [-332.374, 0.05, -65.925],
+      position: [-785.925, 0.05, 292.374],
       scale: [1, 1, 1],
-      basis: 'blender-ground',
+      basis: 'gltf-ground',
     },
     roadWidth: MARINA_MODEL_ROUTE.roadWidth,
     wallOffset: MARINA_MODEL_ROUTE.wallOffset,
     modelRoute: true,
-    props: ['tunnel', 'flyer', 'mbs', 'water'],
+    modelPitDisabled: true,
+    props: [],
     // 观众席 [x, z, rotY]
     grandstands: [
       [-300, 370, Math.PI],      // 发车直道外侧 (主看台)
